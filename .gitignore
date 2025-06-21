@@ -1,3 +1,14 @@
 uploads/
 database.db
 .DS_Store
+upload*
+*.db
+.env
+wsgi.py
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+# Ignore virtual environment directories
+venv/
+
