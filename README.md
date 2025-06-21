@@ -1,3 +1,15 @@
-# drop.i2p
+# i2pcake
 
-Public repo for the popular drop.i2p image/pastebin service
+set explicit URL
+
+centrally banner message
+
+change key and pw
+
+reset img/paste count
+
+Why are expired entries in admin page
+
+should not redirect on admin delete
+
+upload fixed files
