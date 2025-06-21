@@ -3,416 +3,106 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>I2P Secure Share</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}"/>
+  <title>Image Uploaded - I2P Secure Share</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css"/>
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+
   <style>
     body { background-color: #1a202c; color: #cbd5e0; }
-    .content-container { background-color: #2d3748; border:1px solid #4a5568; border-radius:0.5rem; }
-    .tab { border-bottom:2px solid transparent; cursor:pointer; }
-    .tab.active { border-bottom-color:#63b3ed; color:#ffffff; }
+    .link-box { background-color: #2d3748; border:1px solid #4a5568; word-break:break-all; }
     .btn { background-color:#4299e1; transition:background-color .3s ease; }
     .btn:hover { background-color:#3182ce; }
-    select,textarea,input[type="text"],input[type="password"],input[type="number"] {
-      background-color:#4a5568; border:1px solid #718096; color:#cbd5e0;
-    }
-    .alert-success { background-color:#38a169; }
-    .alert-error   { background-color:#e53e3e; }
+    .thumbnail-container { border:2px dashed #4a5568; max-width:100%; }
+    .thumbnail { max-width:100%; max-height:60vh; object-fit:contain; }
     .announcement-bar { background-color:#2563eb; border-bottom:1px solid #1e3a8a; }
-    .reveal { display:none; }
-    input[type="file"] {
-      width:100%; padding:0.5rem 1rem; border-radius:0.375rem;
-      background-color:#4a5568; border:1px solid #718096; color:#cbd5e0; cursor:pointer;
-    }
-    input[type="file"]::file-selector-button {
-      background-color:#2d3748; color:#cbd5e0; border:none;
-      padding:0.5rem 1rem; margin-right:1rem; border-radius:0.375rem; cursor:pointer;
-      transition:background-color .3s ease;
-    }
-    input[type="file"]::file-selector-button:hover { background-color:#3a4a5a; }
-    .stat-card {
-      background-color:#2d3748; border:1px solid #4a5568; border-radius:0.5rem;
-    }
-    .stat-value { color:#63b3ed; }
-    .label-with-icon {
-      display:inline-flex; align-items:center; gap:0.5rem; font-size:0.875rem; color:#cbd5e0;
-    }
-    .label-with-icon svg {
-      width:1rem; height:1rem; color:#4299e1; flex-shrink:0;
-    }
-    .feature-card {
-        background-color: #2d3748;
-        border: 1px solid #4a5568;
-        border-radius: 0.5rem;
-    }
-    /* API Docs Styling */
-    .docs-container h3 {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #ffffff;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid #4a5568;
-    }
-    .docs-container p { margin-bottom: 1rem; color: #a0aec0; }
-    .docs-container ul { list-style-position: inside; margin-bottom: 1rem; }
-    .docs-container li { margin-bottom: 0.5rem; color: #cbd5e0;}
-    .docs-container code {
-      background-color:#1a202c;
-      color:#f7fafc;
-      padding:0.2rem 0.4rem;
-      border-radius:0.25rem;
-      font-family:monospace;
-      font-size: 0.875rem;
-    }
-    .docs-container pre {
-      background-color:#1a202c;
-      padding:1rem;
-      border-radius:0.5rem;
-      overflow-x:auto;
-      color:#f7fafc;
-      font-family:monospace;
-    }
   </style>
-  <noscript>
-    <style>
-      .tab-nav-container{display:none;}
-      .tab-content{display:none!important;}
-      #image-form,#paste-form{display:block!important;margin-bottom:2rem;}
-      #api-docs,#stats-content,#tos-content,.features-section{display:none!important;}
-      @media(min-width:1024px){.noscript-forms-container{display:flex;gap:1.5rem;} .noscript-forms-container>div{flex:1;}}
-      .reveal{display:block!important;}
-    </style>
-  </noscript>
 </head>
 <body class="font-sans">
 
-{% if announcement_enabled and announcement_message %}
+  {% if announcement_enabled and announcement_message %}
   <div id="announcement-bar" class="announcement-bar text-white text-center p-2 relative shadow-lg">
     <span>{{ announcement_message }}</span>
-    <button id="close-announcement"
-            class="absolute top-0 right-0 mt-2 mr-4 text-white hover:text-gray-200 text-2xl leading-none">&times;</button>
+    <button id="close-announcement" class="absolute top-0 right-0 mt-2 mr-4 text-white hover:text-gray-200 text-2xl leading-none">&times;</button>
   </div>
-{% endif %}
+  {% endif %}
 
-<div class="flex items-center justify-center min-h-screen py-8">
-  <div id="main-container" class="w-full max-w-2xl mx-auto p-4">
-    <header class="text-center mb-8">
-      <a href="/" class="inline-block mb-4">
-        <img src="/static/images/stormycloud.svg"
-             alt="StormyCloud Logo"
-             style="width:550px;max-width:100%;"
-             class="mx-auto"/>
-      </a>
-      <h1 class="text-4xl font-bold text-white">I2P Secure Share</h1>
-      <p class="text-gray-400">Anonymously share images and text pastes.</p>
-    </header>
-
-    <main>
-      <div id="js-error-container"
-           class="hidden alert-error text-white p-3 rounded-md shadow-lg mb-4"
-           role="alert"></div>
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="mb-4">
-            {% for category,message in messages %}
-              <div class="alert-{{category}} text-white p-3 rounded-md shadow-lg"
-                   role="alert">{{ message }}</div>
-            {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
-
-      <div class="mb-4 border-b border-gray-700 tab-nav-container">
-        <nav class="flex -mb-px" id="tab-nav">
-          <a href="#image"
-             class="tab active text-gray-300 py-4 px-6 block hover:text-white">Image Uploader</a>
-          <a href="#paste"
-             class="tab text-gray-300 py-4 px-6 block hover:text-white">Pastebin</a>
-          <a href="#api"
-             class="tab text-gray-300 py-4 px-6 block hover:text-white">API</a>
-          <a href="#stats"
-             class="tab text-gray-300 py-4 px-6 block hover:text-white">Stats</a>
-          <a href="#tos"
-             class="tab text-gray-300 py-4 px-6 block hover:text-white">Terms</a>
-        </nav>
-      </div>
-
-      <div class="noscript-forms-container">
-        <!-- IMAGE FORM -->
-        <div id="image-form" class="content-container rounded-lg p-8 shadow-lg tab-content">
-          <form action="/upload/image" method="POST" enctype="multipart/form-data">
-            <h2 class="text-2xl font-semibold mb-6 text-white">Upload an Image</h2>
-
+  <div class="flex items-center justify-center min-h-screen py-8">
+    <div class="w-full max-w-2xl mx-auto p-4">
+      {% if password_required %}
+        <div class="content-container rounded-lg p-8 shadow-lg">
+          <h2 class="text-2xl font-semibold text-white mb-6">Enter Password to View Image</h2>
+          <form method="POST">
             <div class="mb-6">
-              <label for="image-file" class="block text-gray-300 text-sm font-bold mb-2">Image File:</label>
-              <input type="file" name="file" id="image-file" required>
-              <p class="text-xs text-gray-500 mt-1">Max 10MB; WebP conversion.</p>
+              <label for="password" class="block text-gray-300 text-sm font-bold mb-2">Password:</label>
+              <input type="password" name="password" id="password"
+                     class="w-full p-2 rounded-md text-white bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                     required>
             </div>
-
-            <div class="mb-6">
-              <label for="image-expiry" class="block text-gray-300 text-sm font-bold mb-2">Delete after:</label>
-              <select name="expiry" id="image-expiry" class="w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="15m">15 minutes</option>
-                <option value="1h" selected>1 hour</option>
-                <option value="2h">2 hours</option>
-                <option value="4h">4 hours</option>
-                <option value="8h">8 hours</option>
-                <option value="12h">12 hours</option>
-                <option value="24h">24 hours</option>
-                <option value="48h">48 hours</option>
-              </select>
-            </div>
-
-            <div class="mb-6 text-gray-300" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;align-items:start;">
-              <label class="label-with-icon">
-                <input type="checkbox" name="keep_exif">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6M7 7h10M4 6h16M4 6a2 2 0 012-2h8l2 2h6a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/></svg>
-                <span>Keep EXIF Data</span>
-              </label>
-              <label class="label-with-icon">
-                <input type="checkbox" id="image-pw-protect" name="password_protect">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3V6a3 3 0 10-6 0v2c0 1.657 1.343 3 3 3z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 11h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg>
-                <span>Password</span>
-              </label>
-              <label class="label-with-icon" title="Removed after this many successful views">
-                <input type="checkbox" id="image-views-protect" name="views_protect">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                <span>Max Views</span>
-              </label>
-            </div>
-
-            <div id="image-pw-options" class="reveal mb-6">
-              <label for="image-password" class="block text-gray-300 text-sm font-bold mb-1">Password:</label>
-              <input type="password" name="password" id="image-password" class="w-full p-2 rounded-md border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-            </div>
-            <div id="image-views-options" class="reveal mb-6">
-              <label for="image-max-views" class="block text-gray-300 text-sm font-bold mb-1">Max views:</label>
-              <input type="number" name="max_views" id="image-max-views" min="1" class="w-full p-2 rounded-md border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-            </div>
-
-            <button type="submit" class="btn w-full text-white font-bold py-3 px-5 rounded-md focus:shadow-outline">Upload Image</button>
+            <button type="submit" class="btn w-full text-white font-bold py-3 px-5 rounded-md">Unlock Image</button>
           </form>
         </div>
-
-        <!-- PASTE FORM -->
-        <div id="paste-form" class="content-container rounded-lg p-8 shadow-lg hidden tab-content">
-          <form action="/upload/paste" method="POST">
-            <h2 class="text-2xl font-semibold mb-6 text-white">Create a Paste</h2>
-            <div class="mb-6">
-              <label for="paste-content" class="block text-gray-300 text-sm font-bold mb-2">Paste Content:</label>
-              <textarea name="content" id="paste-content" rows="10" class="w-full p-2 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" required></textarea>
-            </div>
-            <div class="mb-6">
-              <label for="paste-language" class="block text-gray-300 text-sm font-bold mb-2">Language:</label>
-              <select name="language" id="paste-language" class="w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="text">Plain Text</option>
-                {% for lang in languages %}
-                  <option value="{{ lang }}">{{ lang|capitalize }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="mb-6">
-              <label for="paste-expiry" class="block text-gray-300 text-sm font-bold mb-2">Delete after:</label>
-              <select name="expiry" id="paste-expiry" class="w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="15m">15 minutes</option>
-                <option value="1h" selected>1 hour</option>
-                <option value="2h">2 hours</option>
-                <option value="4h">4 hours</option>
-                <option value="8h">8 hours</option>
-                <option value="12h">12 hours</option>
-                <option value="24h">24 hours</option>
-                <option value="48h">48 hours</option>
-              </select>
-            </div>
-            <div class="mb-6 text-gray-300" style="display:grid;grid-template-columns:repeat(2,1fr);gap:2rem;align-items:start;">
-              <label class="label-with-icon">
-                <input type="checkbox" id="paste-pw-protect" name="password_protect">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3V6a3 3 0 10-6 0v2c0 1.657 1.343 3 3 3z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 11h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg>
-                <span>Password</span>
-              </label>
-              <label class="label-with-icon" title="Removed after this many successful views">
-                <input type="checkbox" id="paste-views-protect" name="views_protect">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                <span>Max Views</span>
-              </label>
-            </div>
-            <div id="paste-pw-options" class="reveal mb-6">
-              <label for="paste-password" class="block text-gray-300 text-sm font-bold mb-1">Password:</label>
-              <input type="password" name="password" id="paste-password" class="w-full p-2 rounded-md border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-            </div>
-            <div id="paste-views-options" class="reveal mb-6">
-              <label for="paste-max-views" class="block text-gray-300 text-sm font-bold mb-1">Max views:</label>
-              <input type="number" name="max_views" id="paste-max-views" min="1" class="w-full p-2 rounded-md border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-            </div>
-            <button type="submit" class="btn w-full text-white font-bold py-3 px-5 rounded-md focus:shadow-outline">Create Paste</button>
-          </form>
-        </div>
-      
-        <!-- API DOCS -->
-        <div id="api-docs" class="content-container docs-container rounded-lg p-8 shadow-lg hidden tab-content">
-            <h3>Introduction</h3>
-            <p>The API allows programmatic uploads. All endpoints are rate-limited. No API key is required.</p>
-            
-            <h3>Uploading an Image</h3>
-            <p>Send a <code>POST</code> request with <code>multipart/form-data</code>.</p>
-            <ul>
-                <li><strong>Endpoint:</strong> <code>POST /api/upload/image</code></li>
-                <li><strong>Parameter <code>file</code>:</strong> (Required) The image file.</li>
-                <li><strong>Parameter <code>expiry</code>:</strong> (Optional) Values: <code>15m</code>, <code>1h</code>, <code>2h</code>, <code>4h</code>, <code>8h</code>, <code>12h</code>, <code>24h</code>, <code>48h</code>.</li>
-                <li><strong>Parameter <code>password</code>:</strong> (Optional) A password to protect the content.</li>
-                <li><strong>Parameter <code>max_views</code>:</strong> (Optional) An integer for auto-deletion after N views.</li>
-            </ul>
-            <pre>curl -X POST -F "file=@/path/to/image.jpg" http://{{ request.host }}/api/upload/image</pre>
-
-            <h3>Creating a Paste</h3>
-            <p>Send a <code>POST</code> request with a JSON payload.</p>
-            <ul>
-                <li><strong>Endpoint:</strong> <code>POST /api/upload/paste</code></li>
-                <li><strong>JSON Field <code>content</code>:</strong> (Required) The paste text.</li>
-                <li><strong>JSON Field <code>language</code>:</strong> (Optional) A valid language for syntax highlighting. Defaults to 'text'.</li>
-                <li><strong>JSON Field <code>expiry</code>:</strong> (Optional) Same values as image expiry.</li>
-                <li><strong>JSON Field <code>password</code>:</strong> (Optional) A password to protect the content.</li>
-                <li><strong>JSON Field <code>max_views</code>:</strong> (Optional) An integer for auto-deletion after N views.</li>
-            </ul>
-            <pre>curl -X POST -H "Content-Type: application/json" \
--d '{"content":"Hello World", "expiry":"1h"}' \
-http://{{ request.host }}/api/upload/paste</pre>
-        </div>
-
-        <!-- STATS -->
-        <div id="stats-content" class="content-container rounded-lg p-8 shadow-lg hidden tab-content">
-            <h2 class="text-3xl font-bold text-white text-center mb-8">Service Statistics</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div class="stat-card p-6 text-center">
-                    <h3 class="text-xl font-semibold text-white mb-2">Total Image Uploads</h3>
-                    <p class="text-5xl font-bold stat-value">{{ stats.total_images }}</p>
-                </div>
-                <div class="stat-card p-6 text-center">
-                    <h3 class="text-xl font-semibold text-white mb-2">Total Paste Uploads</h3>
-                    <p class="text-5xl font-bold stat-value">{{ stats.total_pastes }}</p>
-                </div>
-                <div class="stat-card p-6 text-center">
-                    <h3 class="text-xl font-semibold text-white mb-2">Total API Uploads</h3>
-                    <p class="text-5xl font-bold stat-value">{{ stats.total_api_uploads }}</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- TERMS OF SERVICE -->
-        <div id="tos-content" class="content-container tos-container rounded-lg p-8 shadow-lg hidden tab-content">
-            <h2 class="text-3xl font-bold text-white mb-4">Terms of Service</h2>
-            <p><strong>Last Updated: June 20, 2025</strong></p>
-            <p>By using this service you agree to these terms. The service is provided “as-is” with a focus on privacy.</p>
-            <h3 class="mt-6 text-white text-xl font-semibold mb-2">1. Privacy & Data</h3>
-            <ul class="list-disc list-inside text-gray-300 mb-4">
-                <li>No logs of your identity or IP.</li>
-                <li>All uploads are encrypted at rest.</li>
-                <li>Data auto-deletes after expiry or view limit.</li>
-                <li>EXIF metadata only kept if opted-in.</li>
-            </ul>
-            <h3 class="mt-6 text-white text-xl font-semibold mb-2">2. Acceptable Use</h3>
-            <p class="text-gray-300 mb-4">Do not upload illegal or harmful content. We reserve the right to remove content that violates these terms.</p>
-            <h3 class="mt-6 text-white text-xl font-semibold mb-2">3. Liability</h3>
-            <p class="text-gray-300">This free service comes with no warranties. We are not responsible for data loss.</p>
-        </div>
-      </div>
-
-      <!-- Version Info (Moved outside the tabbed content) -->
-      <div class="text-center text-xs text-gray-500 mt-6 mb-8">
-          <a href="https://github.com/your-username/your-repo-name" target="_blank" rel="noopener noreferrer" class="hover:text-gray-400 transition-colors">
-              Version 1.1
+      {% else %}
+        <header class="text-center mb-8">
+          <a href="/" class="inline-block mb-4">
+            <img src="/static/images/stormycloud.svg"
+                 alt="StormyCloud Logo"
+                 style="width:550px; max-width:100%;" class="mx-auto"/>
           </a>
-      </div>
+          <h1 class="text-3xl font-bold text-white">Image Uploaded Successfully</h1>
+          <p class="text-gray-400 mt-2 text-xl">Expires in: {{ time_left }}</p>
+        </header>
 
-      <!-- FEATURES -->
-      <section class="text-center features-section">
-        <h2 class="text-3xl font-bold text-white mb-8">Features</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div class="feature-card p-6 rounded-lg">
-            <div class="flex items-center justify-center h-12 w-12 rounded-md bg-blue-500 text-white mx-auto mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-            </div>
-            <h3 class="text-xl font-semibold text-white mb-2">Encrypted at Rest</h3>
-            <p class="text-gray-400">All uploaded files and pastes are fully encrypted on the server, ensuring your data is protected.</p>
+        <main>
+          <div class="thumbnail-container rounded-lg p-4 mb-6 flex justify-center items-center">
+            <img src="/uploads/{{ filename }}"
+                 alt="Uploaded Image" class="thumbnail rounded-md"/>
           </div>
-          <div class="feature-card p-6 rounded-lg">
-            <div class="flex items-center justify-center h-12 w-12 rounded-md bg-blue-500 text-white mx-auto mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.786-2.673 9.356 m-2.673-9.356C6.673 8.214 9.327 5.5 12 5.5 c2.673 0 5.327 2.714 5.327 5.5s-1.009 6.786-2.673 9.356m-2.673-9.356h0z" /></svg>
+
+          <div class="link-box rounded-lg p-4 mb-4">
+            <label for="share-link" class="block text-gray-300 text-sm font-bold mb-2">Direct Image Link:</label>
+            <div class="flex items-center space-x-2">
+              <input type="text" id="share-link"
+                     class="bg-gray-700 text-white w-full p-2 border border-gray-600 rounded-md"
+                     value="{{ request.host_url }}uploads/{{ filename }}" readonly>
+              <button id="copy-button"
+                      class="btn whitespace-nowrap flex-shrink-0 text-white font-bold py-3 px-5 rounded-md">
+                Copy
+              </button>
             </div>
-            <h3 class="text-xl font-semibold text-white mb-2">Anonymous by Design</h3>
-            <p class="text-gray-400">Image metadata (EXIF) is stripped and no unnecessary logs are kept. Built for the I2P network.</p>
           </div>
-          <div class="feature-card p-6 rounded-lg">
-            <div class="flex items-center justify-center h-12 w-12 rounded-md bg-blue-500 text-white mx-auto mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
-            </div>
-            <h3 class="text-xl font-semibold text-white mb-2">StormyCloud Infrastructure</h3>
-            <p class="text-gray-400">A fast, reliable, and secure platform dedicated to the privacy of the I2P community.</p>
+
+          <div class="text-center mt-8">
+            <a href="/" class="text-blue-400 hover:text-blue-300">Upload another file</a>
           </div>
-        </div>
-      </section>
+                 <div class="text-center mt-4 text-sm">
+                     <p class="text-gray-500">Find this service useful? <a href="/donate" class="text-blue-400 hover:underline">Consider supporting its future.</a></p>
+                 </div>
+          
+        </main>
+      {% endif %}
 
       <footer class="text-center text-gray-500 mt-16 border-t border-gray-700 pt-8 pb-8">
         <a href="http://stormycloud.i2p" class="hover:text-gray-400">StormyCloud</a>
         <span class="mx-2">|</span>
         <a href="/donate" class="hover:text-gray-400">Donate</a>
       </footer>
-    </main>
+    </div>
   </div>
-</div>
 
-<script>
-  document.addEventListener('DOMContentLoaded', () => {
-    const contentDivs = {
-      '#image': document.querySelector('#image-form'),
-      '#paste': document.querySelector('#paste-form'),
-      '#api':   document.querySelector('#api-docs'),
-      '#stats': document.querySelector('#stats-content'),
-      '#tos':   document.querySelector('#tos-content')
-    };
-    const tabs = document.querySelectorAll('#tab-nav a');
-    function showTab(hash) {
-      if (!hash || !contentDivs[hash]) hash = '#image';
-      
-      Object.values(contentDivs).forEach(d => {
-        if(d) d.classList.add('hidden');
+  <script>
+    const copyBtn = document.getElementById('copy-button');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        const inp = document.getElementById('share-link');
+        inp.select(); document.execCommand('copy');
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => copyBtn.textContent = 'Copy', 2000);
       });
-      tabs.forEach(t => t.classList.remove('active'));
-      
-      if(contentDivs[hash]) {
-        contentDivs[hash].classList.remove('hidden');
-      }
-      const activeTab = document.querySelector(`#tab-nav a[href="${hash}"]`);
-      if(activeTab) {
-        activeTab.classList.add('active');
-      }
     }
-    tabs.forEach(tab => tab.addEventListener('click', e => {
-      e.preventDefault();
-      const h = e.target.hash;
-      window.history.replaceState(null, null, ' ' + h);
-      showTab(h);
-    }));
-    showTab(window.location.hash);
-
-    function toggle(cbId, tgtId) {
-      const cb = document.getElementById(cbId), tgt = document.getElementById(tgtId);
-      if (!cb||!tgt) return;
-      cb.addEventListener('change', () => tgt.style.display = cb.checked ? 'block' : 'none');
-      tgt.style.display = cb.checked ? 'block' : 'none';
-    }
-    toggle('image-pw-protect','image-pw-options');
-    toggle('image-views-protect','image-views-options');
-    toggle('paste-pw-protect','paste-pw-options');
-    toggle('paste-views-protect','paste-views-options');
-
     const closeBtn = document.getElementById('close-announcement');
-    if (closeBtn) closeBtn.addEventListener('click', ()=>
+    if (closeBtn) closeBtn.addEventListener('click', () =>
       document.getElementById('announcement-bar').style.display = 'none'
     );
-  });
-</script>
+  </script>
 </body>
 </html>
