@@ -1,7 +1,5 @@
 #i2p-drop
 
-favicon
-
-test admin login/hash
+to do:
 
 pastebin increase width
