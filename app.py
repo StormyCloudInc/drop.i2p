@@ -77,7 +77,7 @@ EXPIRY_MAP = {
     "24h": timedelta(hours=24), "48h": timedelta(hours=48)
 }
 POPULAR_LANGUAGES = [
-    'bash', 'c', 'cpp', 'csharp', 'css', 'go', 'html', 'java', 'javascript', 'json',
+    'text', 'bash', 'c', 'cpp', 'csharp', 'css', 'go', 'html', 'java', 'javascript', 'json',
     'kotlin', 'lua', 'markdown', 'php', 'python', 'ruby', 'rust', 'sql', 'swift',
     'typescript', 'xml', 'yaml'
 ]
@@ -253,9 +253,11 @@ def index():
     db = get_db()
     rows = db.execute("SELECT stat_key, stat_value FROM stats").fetchall()
     stats = {r['stat_key']: r['stat_value'] for r in rows}
+    # We want 'text' to be at the top of the list in the index page dropdown
+    index_languages = [lang for lang in POPULAR_LANGUAGES if lang != 'text']
     return render_template(
         'index.html',
-        languages=POPULAR_LANGUAGES,
+        languages=index_languages,
         stats=stats,
         allowed_extensions=list(ALLOWED_EXTENSIONS)
     )
@@ -319,6 +321,7 @@ def upload_image():
         db.commit()
         update_stat('total_images')
         
+        flash('Image uploaded successfully! This is your shareable link.', 'success')
         return redirect(url_for('view_image', filename=new_fn))
 
     flash('Invalid file type.', 'error')
@@ -350,6 +353,7 @@ def upload_paste():
     db.commit()
     update_stat('total_pastes')
     
+    flash('Paste created successfully! This is your shareable link.', 'success')
     return redirect(url_for('view_paste', paste_id=paste_id))
 
 
@@ -405,14 +409,22 @@ def view_paste(paste_id):
         db.commit()
         abort(410)
 
-    db.execute("UPDATE pastes SET view_count = view_count + 1 WHERE id = ?", (paste_id,))
-    db.commit()
+    # Only increment view count on the initial, non-overridden view
+    if 'lang' not in request.args:
+        db.execute("UPDATE pastes SET view_count = view_count + 1 WHERE id = ?", (paste_id,))
+        db.commit()
 
     content = fernet.decrypt(row['content']).decode('utf-8')
+    
+    # Get the language, allowing for a user override via URL parameter
+    default_language = row['language']
+    selected_language = request.args.get('lang', default_language)
+
     try:
-        lexer = get_lexer_by_name(row['language'])
+        lexer = get_lexer_by_name(selected_language)
     except:
         lexer = get_lexer_by_name('text')
+        
     fmt = HtmlFormatter(style='monokai', cssclass='syntax', linenos='table')
     highlighted = highlight(content, lexer, fmt)
 
@@ -420,7 +432,9 @@ def view_paste(paste_id):
                            password_required=False,
                            paste_id=paste_id,
                            highlighted_content=highlighted,
-                           time_left=get_time_left(row['expiry_date'])
+                           time_left=get_time_left(row['expiry_date']),
+                           languages=POPULAR_LANGUAGES,
+                           selected_language=selected_language
                            )
 
 
@@ -587,4 +601,3 @@ if __name__ == '__main__':
     # Run the app. Debug mode is controlled by the SSP_FLASK_DEBUG environment variable.
     # For production, it's recommended to use a proper WSGI server like Gunicorn or uWSGI.
     app.run(debug=app.config['FLASK_DEBUG'], use_reloader=False)
-

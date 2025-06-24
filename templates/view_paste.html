@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Paste Created - I2P Secure Share</title>
+  <title>View Paste - I2P Secure Share</title>
   <link rel="stylesheet" href="/static/css/tailwind.css"/>
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
 
@@ -20,7 +20,80 @@
     }
     .announcement-bar { background-color:#2563eb; border-bottom:1px solid #1e3a8a; }
     .wide-container { max-width: 85rem; }
+    .alert-success { background-color:#38a169; }
+    .alert-error   { background-color:#e53e3e; }
 
+    /* Pygments 'monokai' theme CSS */
+    .syntax .hll { background-color: #49483e }
+    .syntax { background: #272822; color: #f8f8f2 }
+    .syntax .c { color: #75715e } /* Comment */
+    .syntax .err { color: #960050; background-color: #1e0010 } /* Error */
+    .syntax .k { color: #66d9ef } /* Keyword */
+    .syntax .l { color: #ae81ff } /* Literal */
+    .syntax .n { color: #f8f8f2 } /* Name */
+    .syntax .o { color: #f92672 } /* Operator */
+    .syntax .p { color: #f8f8f2 } /* Punctuation */
+    .syntax .ch { color: #75715e } /* Comment.Hashbang */
+    .syntax .cm { color: #75715e } /* Comment.Multiline */
+    .syntax .cp { color: #75715e } /* Comment.Preproc */
+    .syntax .cpf { color: #75715e } /* Comment.PreprocFile */
+    .syntax .c1 { color: #75715e } /* Comment.Single */
+    .syntax .cs { color: #75715e } /* Comment.Special */
+    .syntax .gd { color: #f92672 } /* Generic.Deleted */
+    .syntax .ge { font-style: italic } /* Generic.Emph */
+    .syntax .gi { color: #a6e22e } /* Generic.Inserted */
+    .syntax .gs { font-weight: bold } /* Generic.Strong */
+    .syntax .gu { color: #75715e } /* Generic.Subheading */
+    .syntax .kc { color: #66d9ef } /* Keyword.Constant */
+    .syntax .kd { color: #66d9ef } /* Keyword.Declaration */
+    .syntax .kn { color: #f92672 } /* Keyword.Namespace */
+    .syntax .kp { color: #66d9ef } /* Keyword.Pseudo */
+    .syntax .kr { color: #66d9ef } /* Keyword.Reserved */
+    .syntax .kt { color: #66d9ef } /* Keyword.Type */
+    .syntax .ld { color: #e6db74 } /* Literal.Date */
+    .syntax .m { color: #ae81ff } /* Literal.Number */
+    .syntax .s { color: #e6db74 } /* Literal.String */
+    .syntax .na { color: #a6e22e } /* Name.Attribute */
+    .syntax .nb { color: #f8f8f2 } /* Name.Builtin */
+    .syntax .nc { color: #a6e22e } /* Name.Class */
+    .syntax .no { color: #66d9ef } /* Name.Constant */
+    .syntax .nd { color: #a6e22e } /* Name.Decorator */
+    .syntax .ni { color: #f8f8f2 } /* Name.Entity */
+    .syntax .ne { color: #a6e22e } /* Name.Exception */
+    .syntax .nf { color: #a6e22e } /* Name.Function */
+    .syntax .nl { color: #f8f8f2 } /* Name.Label */
+    .syntax .nn { color: #f8f8f2 } /* Name.Namespace */
+    .syntax .nx { color: #a6e22e } /* Name.Other */
+    .syntax .py { color: #f8f8f2 } /* Name.Property */
+    .syntax .nt { color: #f92672 } /* Name.Tag */
+    .syntax .nv { color: #f8f8f2 } /* Name.Variable */
+    .syntax .ow { color: #f92672 } /* Operator.Word */
+    .syntax .w { color: #f8f8f2 } /* Text.Whitespace */
+    .syntax .mb { color: #ae81ff } /* Literal.Number.Bin */
+    .syntax .mf { color: #ae81ff } /* Literal.Number.Float */
+    .syntax .mh { color: #ae81ff } /* Literal.Number.Hex */
+    .syntax .mi { color: #ae81ff } /* Literal.Number.Integer */
+    .syntax .mo { color: #ae81ff } /* Literal.Number.Oct */
+    .syntax .sa { color: #e6db74 } /* Literal.String.Affix */
+    .syntax .sb { color: #e6db74 } /* Literal.String.Backtick */
+    .syntax .sc { color: #e6db74 } /* Literal.String.Char */
+    .syntax .dl { color: #e6db74 } /* Literal.String.Delimiter */
+    .syntax .sd { color: #e6db74 } /* Literal.String.Doc */
+    .syntax .s2 { color: #e6db74 } /* Literal.String.Double */
+    .syntax .se { color: #ae81ff } /* Literal.String.Escape */
+    .syntax .sh { color: #e6db74 } /* Literal.String.Heredoc */
+    .syntax .si { color: #e6db74 } /* Literal.String.Interpol */
+    .syntax .sx { color: #e6db74 } /* Literal.String.Other */
+    .syntax .sr { color: #e6db74 } /* Literal.String.Regex */
+    .syntax .s1 { color: #e6db74 } /* Literal.String.Single */
+    .syntax .ss { color: #e6db74 } /* Literal.String.Symbol */
+    .syntax .bp { color: #f8f8f2 } /* Name.Builtin.Pseudo */
+    .syntax .fm { color: #a6e22e } /* Name.Function.Magic */
+    .syntax .vc { color: #f8f8f2 } /* Name.Variable.Class */
+    .syntax .vg { color: #f8f8f2 } /* Name.Variable.Global */
+    .syntax .vi { color: #f8f8f2 } /* Name.Variable.Instance */
+    .syntax .vm { color: #f8f8f2 } /* Name.Variable.Magic */
+    .syntax .il { color: #ae81ff } /* Literal.Number.Integer.Long */
   </style>
 </head>
 <body class="font-sans">
@@ -49,16 +122,39 @@
         </div>
       {% else %}
         <header class="text-center mb-8">
-          <a href="/" class="inline-block mb-4">
-            <img src="/static/images/stormycloud.svg"
-                 alt="StormyCloud Logo"
-                 style="width:550px; max-width:100%;" class="mx-auto"/>
-          </a>
-          <h1 class="text-3xl font-bold text-white">Paste Created Successfully</h1>
+<a href="/" class="inline-block mb-4">
+    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="width:350px; max-width:100%;" class="mx-auto"/>
+</a>
+          <h1 class="text-3xl font-bold text-white">View Paste</h1>
           <p class="text-gray-400 mt-2 text-xl">Expires in: {{ time_left }}</p>
         </header>
 
         <main>
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              <div class="mb-4">
+                {% for category, message in messages %}
+                  <div class="alert-{{category}} text-white p-3 rounded-md shadow-lg"
+                       role="alert">{{ message }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endwith %}
+          
+          <div class="flex justify-end mb-2">
+            <form method="GET" action="" class="flex items-center space-x-2">
+                <label for="language-switcher" class="text-sm text-gray-400">Syntax:</label>
+                <select name="lang" id="language-switcher" onchange="this.form.submit()" class="text-sm rounded-md p-1 bg-gray-700 border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                    {% for lang in languages %}
+                        <option value="{{ lang }}" {% if lang == selected_language %}selected{% endif %}>
+                            {{ lang|capitalize }}
+                        </option>
+                    {% endfor %}
+                </select>
+                <noscript><button type="submit" class="btn text-sm py-1 px-3">Update</button></noscript>
+            </form>
+          </div>
+
           <div class="code-container mb-6 syntax">
             {{ highlighted_content|safe }}
           </div>

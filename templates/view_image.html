@@ -3,18 +3,21 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Image Uploaded - I2P Secure Share</title>
+  <title>View Image - I2P Secure Share</title>
   <link rel="stylesheet" href="/static/css/tailwind.css"/>
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
 
   <style>
     body { background-color: #1a202c; color: #cbd5e0; }
+    .content-container { background-color: #2d3748; border: 1px solid #4a5568; }
     .link-box { background-color: #2d3748; border:1px solid #4a5568; word-break:break-all; }
     .btn { background-color:#4299e1; transition:background-color .3s ease; }
     .btn:hover { background-color:#3182ce; }
     .thumbnail-container { border:2px dashed #4a5568; max-width:100%; }
     .thumbnail { max-width:100%; max-height:60vh; object-fit:contain; }
     .announcement-bar { background-color:#2563eb; border-bottom:1px solid #1e3a8a; }
+    .alert-success { background-color:#38a169; }
+    .alert-error   { background-color:#e53e3e; }
   </style>
 </head>
 <body class="font-sans">
@@ -43,16 +46,25 @@
         </div>
       {% else %}
         <header class="text-center mb-8">
-          <a href="/" class="inline-block mb-4">
-            <img src="/static/images/stormycloud.svg"
-                 alt="StormyCloud Logo"
-                 style="width:550px; max-width:100%;" class="mx-auto"/>
-          </a>
-          <h1 class="text-3xl font-bold text-white">Image Uploaded Successfully</h1>
+<a href="/" class="inline-block mb-4">
+    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="width:350px; max-width:100%;" class="mx-auto"/>
+</a>
+          <h1 class="text-3xl font-bold text-white">View Image</h1>
           <p class="text-gray-400 mt-2 text-xl">Expires in: {{ time_left }}</p>
         </header>
 
         <main>
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              <div class="mb-4">
+                {% for category, message in messages %}
+                  <div class="alert-{{category}} text-white p-3 rounded-md shadow-lg"
+                       role="alert">{{ message }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endwith %}
+
           <div class="thumbnail-container rounded-lg p-4 mb-6 flex justify-center items-center">
             <img src="/uploads/{{ filename }}"
                  alt="Uploaded Image" class="thumbnail rounded-md"/>
