@@ -3,6 +3,9 @@
 import os
 import uuid
 import sqlite3
+import mimetypes
+import secrets
+import re
 from datetime import datetime, timedelta
 from io import BytesIO
 
@@ -13,6 +16,8 @@ from flask import (
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
+# Note: For production, consider adding Flask-WTF for CSRF protection
+# from flask_wtf.csrf import CSRFProtect
 
 from PIL import Image
 from pygments import highlight
@@ -30,6 +35,9 @@ load_dotenv()
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
+# Note: CSRF protection would be initialized here if Flask-WTF is available
+# csrf = CSRFProtect(app)
+
 
 app.config['SECRET_KEY'] = os.getenv('SSP_SECRET_KEY')
 app.config['ADMIN_PASSWORD_HASH'] = os.getenv('SSP_ADMIN_PASSWORD_HASH')
@@ -44,9 +52,19 @@ app.config['UPLOAD_FOLDER'] = os.getenv('SSP_UPLOAD_FOLDER', 'uploads')
 app.config['DATABASE_PATH'] = os.getenv('SSP_DATABASE_PATH', 'database.db')
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
 
-app.config['FLASK_DEBUG'] = os.getenv('SSP_FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
+# Ensure debug mode is never enabled in production
+debug_env = os.getenv('SSP_FLASK_DEBUG', 'False').lower()
+app.config['FLASK_DEBUG'] = debug_env in ('true', '1', 't') and os.getenv('FLASK_ENV') != 'production'
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tiff'}
+ALLOWED_MIME_TYPES = {
+    'image/png', 'image/jpeg', 'image/gif', 'image/webp', 
+    'image/bmp', 'image/x-icon', 'image/tiff'
+}
+
+# Maximum filename length and allowed characters
+MAX_FILENAME_LENGTH = 255
+SAFE_FILENAME_REGEX = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 # --- Rate Limiting (I2P-aware) ---
 def i2p_key_func():
@@ -146,13 +164,70 @@ def cleanup_expired_content():
             try:
                 os.remove(path)
             except OSError as e:
-                app.logger.error(f"Error removing expired image file {path}: {e}")
+                app.logger.error(f"Error removing expired image file: {sanitize_error_message(e)}")
             cur.execute("DELETE FROM images WHERE id = ?", (img_id,))
         conn.commit()
         conn.close()
 
 # --- Utility Functions ---
+def sanitize_error_message(error_msg):
+    """Sanitize error messages to prevent information disclosure"""
+    # Remove file paths and sensitive information
+    sanitized = re.sub(r'/[\w/.-]+', '[path]', str(error_msg))
+    sanitized = re.sub(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', '[ip]', sanitized)
+    return sanitized
+
+def secure_session_key(prefix, identifier):
+    """Generate cryptographically secure session keys"""
+    random_token = secrets.token_hex(16)
+    return f"{prefix}_{identifier}_{random_token}"
+
+def validate_filename_security(filename):
+    """Enhanced filename validation for security"""
+    if not filename or len(filename) > MAX_FILENAME_LENGTH:
+        return False
+    
+    # Check for path traversal attempts
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return False
+    
+    # Check for null bytes and control characters
+    if '\x00' in filename or any(ord(c) < 32 for c in filename if c != '\t'):
+        return False
+    
+    # Ensure filename matches safe pattern
+    if not SAFE_FILENAME_REGEX.match(filename):
+        return False
+    
+    return True
+
+def validate_file_content(file_stream, filename):
+    """Validate file content matches expected image format"""
+    try:
+        # Reset stream position
+        file_stream.seek(0)
+        
+        # Check MIME type
+        mime_type, _ = mimetypes.guess_type(filename)
+        if mime_type not in ALLOWED_MIME_TYPES:
+            return False
+        
+        # Try to open as image to verify it's actually an image
+        file_stream.seek(0)
+        img = Image.open(file_stream)
+        img.verify()  # Verify it's a valid image
+        
+        # Reset stream for later use
+        file_stream.seek(0)
+        return True
+    except Exception:
+        return False
+
 def allowed_file(fn):
+    """Enhanced file validation with security checks"""
+    if not fn or not validate_filename_security(fn):
+        return False
+    
     return '.' in fn and fn.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_time_left(expiry_str):
@@ -194,7 +269,7 @@ def process_and_encrypt_image(stream, orig_fn, keep_exif=False):
             f.write(encrypted)
         return new_fn
     except Exception as e:
-        app.logger.error(f"Image processing failed ({orig_fn}): {e}")
+        app.logger.error(f"Image processing failed: {sanitize_error_message(e)}")
         return None
 
 @app.context_processor
@@ -242,7 +317,7 @@ def healthz():
         conn.close()
         db_status = "ok"
     except Exception as e:
-        app.logger.error(f"Health check DB error: {e}")
+        app.logger.error(f"Health check DB error: {sanitize_error_message(e)}")
         db_status = "error"
     sched_status = "running" if scheduler.running and scheduler.state == 1 else "stopped"
     return jsonify(database=db_status, scheduler=sched_status)
@@ -299,7 +374,7 @@ def upload_image():
         return redirect(url_for('index', _anchor='image'))
         
     file = request.files['file']
-    if file and allowed_file(file.filename):
+    if file and allowed_file(file.filename) and validate_file_content(file.stream, file.filename):
         keep_exif = bool(request.form.get('keep_exif'))
         new_fn = process_and_encrypt_image(file.stream, file.filename, keep_exif)
         if not new_fn:
@@ -335,6 +410,11 @@ def upload_paste():
     if not content:
         flash('Paste content cannot be empty.', 'error')
         return redirect(url_for('index', _anchor='paste'))
+    
+    # Input validation and size limits
+    if len(content) > 1024 * 1024:  # 1MB limit for pastes
+        flash('Paste content is too large (max 1MB).', 'error')
+        return redirect(url_for('index', _anchor='paste'))
         
     now = datetime.now()
     expiry = now + EXPIRY_MAP.get(request.form.get('expiry', '1h'), timedelta(hours=1))
@@ -369,10 +449,11 @@ def view_image(filename):
         abort(404)
 
     pw_hash = row['password_hash']
-    if pw_hash and not session.get(f'unlocked_image_{filename}'):
+    session_key = f'unlocked_image_{filename}'
+    if pw_hash and not session.get(session_key):
         if request.method == 'POST':
             if check_password_hash(pw_hash, request.form.get('password', '')):
-                session[f'unlocked_image_{filename}'] = True
+                session[session_key] = secrets.token_hex(16)
                 return redirect(url_for('view_image', filename=filename))
             flash('Incorrect password.', 'error')
         return render_template('view_image.html', password_required=True, filename=filename)
@@ -396,10 +477,11 @@ def view_paste(paste_id):
         abort(404)
 
     pw_hash = row['password_hash']
-    if pw_hash and not session.get(f'unlocked_paste_{paste_id}'):
+    session_key = f'unlocked_paste_{paste_id}'
+    if pw_hash and not session.get(session_key):
         if request.method == 'POST':
             if check_password_hash(pw_hash, request.form.get('password', '')):
-                session[f'unlocked_paste_{paste_id}'] = True
+                session[session_key] = secrets.token_hex(16)
                 return redirect(url_for('view_paste', paste_id=paste_id))
             flash('Incorrect password.', 'error')
         return render_template('view_paste.html', password_required=True, paste_id=paste_id)
@@ -463,8 +545,24 @@ def paste_raw(paste_id):
 
 @app.route('/uploads/<filename>')
 def get_upload(filename):
+    # Enhanced security validation
+    if not validate_filename_security(filename):
+        abort(404)
+    
     safe_fn = secure_filename(filename)
-    path = os.path.join(app.config['UPLOAD_FOLDER'], safe_fn)
+    
+    # Additional path traversal protection
+    if safe_fn != filename or not safe_fn:
+        abort(404)
+    
+    # Ensure the file path is within the upload directory
+    upload_dir = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    file_path = os.path.abspath(os.path.join(upload_dir, safe_fn))
+    
+    if not file_path.startswith(upload_dir + os.sep):
+        abort(404)
+    
+    path = file_path
     db = get_db()
     
     row = db.execute("SELECT * FROM images WHERE id = ?", (safe_fn,)).fetchone()
@@ -494,7 +592,7 @@ def get_upload(filename):
         data = fernet.decrypt(encrypted)
         return send_file(BytesIO(data), mimetype='image/webp')
     except Exception as e:
-        app.logger.error(f"Error serving image {safe_fn}: {e}")
+        app.logger.error(f"Error serving image: {sanitize_error_message(e)}")
         abort(500)
 
 @app.route('/admin/delete/image/<filename>', methods=['POST'])
@@ -509,7 +607,8 @@ def delete_image(filename):
         db.commit()
         flash(f'Image "{safe}" has been deleted.', 'success')
     except Exception as e:
-        flash(f'Error deleting image file: {e}', 'error')
+        flash('Error deleting image file.', 'error')
+        app.logger.error(f'Error deleting image file: {sanitize_error_message(e)}')
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/delete/paste/<paste_id>', methods=['POST'])
@@ -521,7 +620,8 @@ def delete_paste(paste_id):
         db.commit()
         flash(f'Paste "{paste_id}" has been deleted.', 'success')
     except Exception as e:
-        flash(f'Error deleting paste: {e}', 'error')
+        flash('Error deleting paste.', 'error')
+        app.logger.error(f'Error deleting paste: {sanitize_error_message(e)}')
     return redirect(url_for('admin_dashboard'))
 
 # --- API Routes ---
@@ -532,7 +632,7 @@ def api_upload_image():
         return jsonify(error="No file selected"), 400
         
     file = request.files['file']
-    if file and allowed_file(file.filename):
+    if file and allowed_file(file.filename) and validate_file_content(file.stream, file.filename):
         new_fn = process_and_encrypt_image(file.stream, file.filename, bool(request.form.get('keep_exif')))
         if not new_fn: return jsonify(error="Failed to process image"), 500
         
@@ -561,8 +661,15 @@ def api_upload_paste():
     if not request.is_json: return jsonify(error="Request must be JSON"), 400
         
     data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify(error="Invalid JSON data"), 400
+    
     content = data.get('content', '').strip()
     if not content: return jsonify(error="Paste content is missing"), 400
+    
+    # Input validation and size limits
+    if len(content) > 1024 * 1024:  # 1MB limit for pastes
+        return jsonify(error="Paste content is too large (max 1MB)"), 400
         
     now = datetime.now()
     expiry = now + EXPIRY_MAP.get(data.get('expiry', '1h'), timedelta(hours=1))
