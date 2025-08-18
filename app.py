@@ -28,6 +28,7 @@ from cryptography.fernet import Fernet
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
+from ssl_monitor import SSLMonitor
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -42,6 +43,17 @@ csrf = CSRFProtect(app)
 app.config['SECRET_KEY'] = os.getenv('SSP_SECRET_KEY')
 app.config['ADMIN_PASSWORD_HASH'] = os.getenv('SSP_ADMIN_PASSWORD_HASH')
 app.config['ADMIN_URL'] = os.getenv('SSP_ADMIN_URL')
+
+# Clearnet configuration
+app.config['CLEARNET_DOMAIN'] = os.getenv('SSP_CLEARNET_DOMAIN', 'drop.stormycloud.org')
+app.config['I2P_DOMAIN'] = os.getenv('SSP_I2P_DOMAIN', 'drop.i2p')
+
+# Mobile app API key for clearnet authentication
+app.config['MOBILE_API_KEY'] = os.getenv('SSP_MOBILE_API_KEY')
+
+# SSL certificate paths for monitoring
+app.config['SSL_CERT_PATH'] = os.getenv('SSP_SSL_CERT_PATH', '/etc/letsencrypt/live/drop.stormycloud.org/fullchain.pem')
+app.config['SSL_KEY_PATH'] = os.getenv('SSP_SSL_KEY_PATH', '/etc/letsencrypt/live/drop.stormycloud.org/privkey.pem')
 
 enc_key = os.getenv('SSP_ENCRYPTION_KEY')
 if not enc_key:
@@ -66,25 +78,72 @@ ALLOWED_MIME_TYPES = {
 MAX_FILENAME_LENGTH = 255
 SAFE_FILENAME_REGEX = re.compile(r'^[a-zA-Z0-9._-]+$')
 
-# --- Rate Limiting (I2P-aware) ---
-def i2p_key_func():
-    # Prioritize the I2P destination header for rate limiting
+# --- Host Detection and Validation ---
+def is_clearnet_request():
+    """Detect if request is coming from clearnet domain"""
+    host = request.headers.get('Host', '').lower()
+    return app.config['CLEARNET_DOMAIN'].lower() in host
+
+def is_i2p_request():
+    """Detect if request is coming from I2P domain"""
+    host = request.headers.get('Host', '').lower()
+    b32_header = request.headers.get('X-I2P-DestB32')
+    return app.config['I2P_DOMAIN'].lower() in host or bool(b32_header)
+
+def validate_host():
+    """Validate that the request is from an allowed host"""
+    host = request.headers.get('Host', '').lower()
+    allowed_hosts = [app.config['CLEARNET_DOMAIN'].lower(), app.config['I2P_DOMAIN'].lower()]
+    return any(allowed_host in host for allowed_host in allowed_hosts)
+
+def validate_mobile_api_key():
+    """Validate mobile app API key for clearnet requests"""
+    if not app.config.get('MOBILE_API_KEY'):
+        return True  # If no API key is configured, allow all requests
+    
+    api_key = request.headers.get('X-API-Key')
+    return api_key == app.config['MOBILE_API_KEY']
+
+def get_appropriate_base_url():
+    """Get the appropriate base URL based on request source"""
+    if is_clearnet_request():
+        return f"https://{app.config['CLEARNET_DOMAIN']}"
+    else:
+        return f"http://{app.config['I2P_DOMAIN']}"
+
+# --- Rate Limiting (I2P-aware + Clearnet-aware) ---
+def smart_key_func():
+    """Smart rate limiting key function for both I2P and clearnet"""
+    # For I2P: Prioritize the I2P destination header for rate limiting
     b32 = request.headers.get('X-I2P-DestB32')
     if b32:
-        return b32
-    # Fallback to X-Forwarded-For if behind a standard proxy
-    fwd = request.headers.get('X-Forwarded-For')
-    if fwd:
-        return fwd.split(',')[0].strip()
-    # Final fallback to the direct remote address
-    return get_remote_address()
+        return f"i2p:{b32}"
+    
+    # For clearnet: Use IP-based limiting
+    if is_clearnet_request():
+        fwd = request.headers.get('X-Forwarded-For')
+        if fwd:
+            return f"clearnet:{fwd.split(',')[0].strip()}"
+        return f"clearnet:{get_remote_address()}"
+    
+    # Fallback for any other case
+    return f"unknown:{get_remote_address()}"
 
 limiter = Limiter(
     app=app,
-    key_func=i2p_key_func,
+    key_func=smart_key_func,
     default_limits=["200 per day", "50 per hour"],
     storage_uri="memory://"
 )
+
+# Clearnet-specific rate limits (more restrictive)
+def clearnet_rate_limit(limit_string):
+    """Apply stricter rate limiting for clearnet requests"""
+    def decorator(f):
+        if is_clearnet_request():
+            return limiter.limit(limit_string)(f)
+        return f
+    return decorator
 
 fernet = Fernet(app.config['ENCRYPTION_KEY'])
 
@@ -321,6 +380,45 @@ def healthz():
         db_status = "error"
     sched_status = "running" if scheduler.running and scheduler.state == 1 else "stopped"
     return jsonify(database=db_status, scheduler=sched_status)
+
+
+# --- SSL Status Monitoring for UptimeRobot ---
+@app.route('/ssl-status')
+def ssl_status():
+    """SSL certificate status endpoint for external monitoring"""
+    try:
+        ssl_monitor = SSLMonitor(
+            cert_path=app.config.get('SSL_CERT_PATH'),
+            key_path=app.config.get('SSL_KEY_PATH')
+        )
+        
+        cert_info = ssl_monitor.get_cert_info(use_file=True)
+        
+        if cert_info:
+            return jsonify({
+                "ssl_expires": cert_info["expires"],
+                "days_remaining": cert_info["days_remaining"],
+                "status": cert_info["status"],
+                "needs_renewal": cert_info["needs_renewal"],
+                "is_expired": cert_info["is_expired"],
+                "checked_at": datetime.now().isoformat(),
+                "domain": app.config['CLEARNET_DOMAIN']
+            })
+        else:
+            return jsonify({
+                "error": "Could not read SSL certificate",
+                "status": "unknown",
+                "checked_at": datetime.now().isoformat(),
+                "domain": app.config['CLEARNET_DOMAIN']
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"SSL status check error: {sanitize_error_message(e)}")
+        return jsonify({
+            "error": "SSL status check failed",
+            "status": "error",
+            "checked_at": datetime.now().isoformat()
+        }), 500
 
 # --- Web UI Routes ---
 @app.route('/')
@@ -651,7 +749,9 @@ def api_upload_image():
         )
         db.commit()
         update_stat('total_api_uploads')
-        return jsonify(success=True, url=url_for('get_upload', filename=new_fn, _external=True)), 200
+        base_url = get_appropriate_base_url()
+        upload_url = f"{base_url}/uploads/{new_fn}"
+        return jsonify(success=True, url=upload_url), 200
 
     return jsonify(error="Invalid file type"), 400
 
@@ -689,7 +789,280 @@ def api_upload_paste():
     )
     db.commit()
     update_stat('total_api_uploads')
-    return jsonify(success=True, url=url_for('view_paste', paste_id=paste_id, _external=True)), 200
+    base_url = get_appropriate_base_url()
+    paste_url = f"{base_url}/paste/{paste_id}"
+    return jsonify(success=True, url=paste_url), 200
+
+
+# --- Clearnet-Specific API Routes ---
+@app.route('/api/clearnet/upload/image', methods=['POST'])
+@limiter.limit("30 per hour")  # More restrictive for clearnet
+@csrf.exempt
+def api_clearnet_upload_image():
+    """Clearnet-specific image upload endpoint with mobile app authentication"""
+    # Validate that this is actually a clearnet request
+    if not is_clearnet_request():
+        return jsonify(error="This endpoint is only available via clearnet"), 403
+    
+    if not validate_host():
+        return jsonify(error="Invalid host"), 400
+    
+    # Validate mobile API key
+    if not validate_mobile_api_key():
+        return jsonify(error="Invalid or missing API key"), 401
+    
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return jsonify(error="No file selected"), 400
+        
+    file = request.files['file']
+    if file and allowed_file(file.filename) and validate_file_content(file.stream, file.filename):
+        new_fn = process_and_encrypt_image(file.stream, file.filename, bool(request.form.get('keep_exif')))
+        if not new_fn: return jsonify(error="Failed to process image"), 500
+        
+        now = datetime.now()
+        expiry = now + EXPIRY_MAP.get(request.form.get('expiry', '1h'), timedelta(hours=1))
+        pw = request.form.get('password')
+        pw_hash = generate_password_hash(pw, method='pbkdf2:sha256') if pw else None
+        mv = request.form.get('max_views')
+        mv = int(mv) if mv and mv.isdigit() else None
+
+        db = get_db()
+        db.execute(
+            'INSERT INTO images (id, upload_date, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?)',
+            (new_fn, now, expiry, pw_hash, mv, -1)
+        )
+        db.commit()
+        update_stat('total_api_uploads')
+        
+        # Always return clearnet URL for clearnet uploads
+        clearnet_url = f"https://{app.config['CLEARNET_DOMAIN']}/uploads/{new_fn}"
+        return jsonify(success=True, url=clearnet_url, source="clearnet"), 200
+
+    return jsonify(error="Invalid file type"), 400
+
+
+@app.route('/api/clearnet/upload/paste', methods=['POST'])
+@limiter.limit("60 per hour")  # More restrictive for clearnet
+@csrf.exempt
+def api_clearnet_upload_paste():
+    """Clearnet-specific paste upload endpoint with mobile app authentication"""
+    # Validate that this is actually a clearnet request
+    if not is_clearnet_request():
+        return jsonify(error="This endpoint is only available via clearnet"), 403
+    
+    if not validate_host():
+        return jsonify(error="Invalid host"), 400
+    
+    # Validate mobile API key
+    if not validate_mobile_api_key():
+        return jsonify(error="Invalid or missing API key"), 401
+    
+    if not request.is_json: return jsonify(error="Request must be JSON"), 400
+        
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify(error="Invalid JSON data"), 400
+    
+    content = data.get('content', '').strip()
+    if not content: return jsonify(error="Paste content is missing"), 400
+    
+    # Input validation and size limits
+    if len(content) > 1024 * 1024:  # 1MB limit for pastes
+        return jsonify(error="Paste content is too large (max 1MB)"), 400
+        
+    now = datetime.now()
+    expiry = now + EXPIRY_MAP.get(data.get('expiry', '1h'), timedelta(hours=1))
+    pw = data.get('password')
+    pw_hash = generate_password_hash(pw, method='pbkdf2:sha256') if pw else None
+    mv = data.get('max_views')
+    mv = int(mv) if mv and str(mv).isdigit() else None
+
+    paste_id = uuid.uuid4().hex
+    encrypted = fernet.encrypt(content.encode('utf-8'))
+    db = get_db()
+    db.execute(
+        'INSERT INTO pastes (id, content, language, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (paste_id, encrypted, data.get('language', 'text'), expiry, pw_hash, mv, -1)
+    )
+    db.commit()
+    update_stat('total_api_uploads')
+    
+    # Always return clearnet URL for clearnet uploads
+    clearnet_url = f"https://{app.config['CLEARNET_DOMAIN']}/paste/{paste_id}"
+    return jsonify(success=True, url=clearnet_url, source="clearnet"), 200
+
+
+# --- End-to-End Encryption API Endpoints ---
+@app.route('/api/clearnet/upload/image/encrypted', methods=['POST'])
+@limiter.limit("20 per hour")  # Even more restrictive for E2E
+@csrf.exempt
+def api_clearnet_upload_image_encrypted():
+    """End-to-end encrypted image upload for mobile app"""
+    # Validate clearnet request and API key
+    if not is_clearnet_request():
+        return jsonify(error="This endpoint is only available via clearnet"), 403
+    
+    if not validate_host():
+        return jsonify(error="Invalid host"), 400
+    
+    if not validate_mobile_api_key():
+        return jsonify(error="Invalid or missing API key"), 401
+    
+    # For E2E encrypted uploads, we expect base64 encoded encrypted data
+    if not request.is_json:
+        return jsonify(error="Request must be JSON for encrypted uploads"), 400
+    
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify(error="Invalid JSON data"), 400
+    
+    # Validate required fields for encrypted upload
+    encrypted_data = data.get('encrypted_data')
+    client_iv = data.get('iv')  # Initialization vector used by client
+    content_type = data.get('content_type', 'image/webp')
+    
+    if not encrypted_data or not client_iv:
+        return jsonify(error="Missing encrypted_data or iv"), 400
+    
+    # Validate data size (base64 encoded, so account for encoding overhead)
+    if len(encrypted_data) > 15 * 1024 * 1024:  # ~15MB to account for base64 encoding
+        return jsonify(error="Encrypted data too large"), 400
+    
+    try:
+        # Store the client-encrypted data directly (double encryption)
+        now = datetime.now()
+        expiry = now + EXPIRY_MAP.get(data.get('expiry', '1h'), timedelta(hours=1))
+        pw = data.get('password')
+        pw_hash = generate_password_hash(pw, method='pbkdf2:sha256') if pw else None
+        mv = data.get('max_views')
+        mv = int(mv) if mv and str(mv).isdigit() else None
+        
+        # Generate unique filename
+        image_id = uuid.uuid4().hex
+        
+        # Store metadata about the encrypted upload
+        upload_metadata = {
+            'client_encrypted': True,
+            'content_type': content_type,
+            'iv': client_iv,
+            'upload_source': 'mobile_app_e2e'
+        }
+        
+        # Encrypt the client-encrypted data again for server-side storage
+        metadata_json = json.dumps(upload_metadata)
+        combined_data = f"{metadata_json}||{encrypted_data}"
+        server_encrypted = fernet.encrypt(combined_data.encode('utf-8'))
+        
+        # Store in database as encrypted image
+        db = get_db()
+        db.execute(
+            'INSERT INTO images (id, upload_date, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?)',
+            (image_id, now, expiry, pw_hash, mv, -1)
+        )
+        
+        # Store the encrypted data as a file
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], image_id)
+        with open(upload_path, 'wb') as f:
+            f.write(server_encrypted)
+        
+        db.commit()
+        update_stat('total_api_uploads')
+        
+        # Return the viewing URL and decryption info
+        clearnet_url = f"https://{app.config['CLEARNET_DOMAIN']}/image/encrypted/{image_id}"
+        return jsonify({
+            'success': True,
+            'url': clearnet_url,
+            'image_id': image_id,
+            'source': 'clearnet_e2e',
+            'requires_client_decryption': True
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"E2E image upload failed: {sanitize_error_message(e)}")
+        return jsonify(error="Failed to process encrypted upload"), 500
+
+
+@app.route('/api/clearnet/upload/paste/encrypted', methods=['POST'])
+@limiter.limit("40 per hour")  # More restrictive for E2E
+@csrf.exempt
+def api_clearnet_upload_paste_encrypted():
+    """End-to-end encrypted paste upload for mobile app"""
+    # Validate clearnet request and API key
+    if not is_clearnet_request():
+        return jsonify(error="This endpoint is only available via clearnet"), 403
+    
+    if not validate_host():
+        return jsonify(error="Invalid host"), 400
+    
+    if not validate_mobile_api_key():
+        return jsonify(error="Invalid or missing API key"), 401
+    
+    if not request.is_json:
+        return jsonify(error="Request must be JSON for encrypted uploads"), 400
+    
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify(error="Invalid JSON data"), 400
+    
+    # Validate required fields
+    encrypted_content = data.get('encrypted_content')
+    client_iv = data.get('iv')
+    language = data.get('language', 'text')
+    
+    if not encrypted_content or not client_iv:
+        return jsonify(error="Missing encrypted_content or iv"), 400
+    
+    # Size validation
+    if len(encrypted_content) > 2 * 1024 * 1024:  # 2MB for encrypted pastes
+        return jsonify(error="Encrypted content too large"), 400
+    
+    try:
+        now = datetime.now()
+        expiry = now + EXPIRY_MAP.get(data.get('expiry', '1h'), timedelta(hours=1))
+        pw = data.get('password')
+        pw_hash = generate_password_hash(pw, method='pbkdf2:sha256') if pw else None
+        mv = data.get('max_views')
+        mv = int(mv) if mv and str(mv).isdigit() else None
+        
+        paste_id = uuid.uuid4().hex
+        
+        # Store metadata about the encrypted paste
+        paste_metadata = {
+            'client_encrypted': True,
+            'language': language,
+            'iv': client_iv,
+            'upload_source': 'mobile_app_e2e'
+        }
+        
+        # Combine metadata and encrypted content
+        metadata_json = json.dumps(paste_metadata)
+        combined_data = f"{metadata_json}||{encrypted_content}"
+        
+        # Server-side encryption of the client-encrypted data
+        server_encrypted = fernet.encrypt(combined_data.encode('utf-8'))
+        
+        db = get_db()
+        db.execute(
+            'INSERT INTO pastes (id, content, language, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (paste_id, server_encrypted, 'encrypted', expiry, pw_hash, mv, -1)
+        )
+        db.commit()
+        update_stat('total_api_uploads')
+        
+        # Return viewing URL
+        clearnet_url = f"https://{app.config['CLEARNET_DOMAIN']}/paste/encrypted/{paste_id}"
+        return jsonify({
+            'success': True,
+            'url': clearnet_url,
+            'paste_id': paste_id,
+            'source': 'clearnet_e2e',
+            'requires_client_decryption': True
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"E2E paste upload failed: {sanitize_error_message(e)}")
+        return jsonify(error="Failed to process encrypted upload"), 500
 
 
 if __name__ == '__main__':
@@ -707,6 +1080,38 @@ if __name__ == '__main__':
     
     print(f"Starting Flask app with debug mode: {app.config['FLASK_DEBUG']}")
     
+    # SSL Configuration for production
+    ssl_context = None
+    cert_path = app.config.get('SSL_CERT_PATH')
+    key_path = app.config.get('SSL_KEY_PATH')
+    
+    # Check if SSL certificates are available
+    if cert_path and key_path and os.path.exists(cert_path) and os.path.exists(key_path):
+        try:
+            ssl_context = (cert_path, key_path)
+            print(f"SSL enabled: Using certificates from {cert_path}")
+        except Exception as e:
+            print(f"SSL setup failed: {e}")
+            print("Running without SSL")
+    else:
+        print("SSL certificates not found or not configured. Running HTTP only.")
+        print("For production with clearnet access, configure SSL certificates.")
+    
+    # Determine port and host
+    port = int(os.getenv('SSP_PORT', 5001))
+    host = os.getenv('SSP_HOST', '0.0.0.0')
+    
+    print(f"Server starting on {host}:{port}")
+    if ssl_context:
+        print(f"HTTPS enabled for clearnet domain: {app.config['CLEARNET_DOMAIN']}")
+    print(f"I2P domain: {app.config['I2P_DOMAIN']}")
+    
     # Run the app. Debug mode is controlled by the SSP_FLASK_DEBUG environment variable.
     # For production, it's recommended to use a proper WSGI server like Gunicorn or uWSGI.
-    app.run(debug=app.config['FLASK_DEBUG'], use_reloader=False)
+    app.run(
+        host=host,
+        port=port,
+        debug=app.config['FLASK_DEBUG'],
+        ssl_context=ssl_context,
+        use_reloader=False
+    )

@@ -11,4 +11,4 @@ __pycache__/
 *.py[cod]
 # Ignore virtual environment directories
 venv/
-
+setup_dev_enviroment.sh
