@@ -103,6 +103,12 @@ def validate_mobile_api_key():
     api_key = request.headers.get('X-API-Key')
     return api_key == app.config['MOBILE_API_KEY']
 
+def block_clearnet_web_access():
+    """Block clearnet users from accessing web interface - API only"""
+    if is_clearnet_request():
+        return jsonify(error="Web interface not available via clearnet. Use API endpoints only."), 403
+    return None
+
 def get_appropriate_base_url():
     """Get the appropriate base URL based on request source"""
     if is_clearnet_request():
@@ -433,6 +439,11 @@ def ssl_status():
 # --- Web UI Routes ---
 @app.route('/')
 def index():
+    # Block clearnet users from web interface
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     db = get_db()
     rows = db.execute("SELECT stat_key, stat_value FROM stats").fetchall()
     stats = {r['stat_key']: r['stat_value'] for r in rows}
@@ -447,6 +458,11 @@ def index():
 
 @app.route('/donate')
 def donate_page():
+    # Block clearnet users from web interface
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     return render_template('donate.html')
 
 if not app.config.get('ADMIN_URL'):
@@ -454,6 +470,11 @@ if not app.config.get('ADMIN_URL'):
 
 @app.route(app.config['ADMIN_URL'], methods=['GET', 'POST'])
 def admin_dashboard():
+    # Block clearnet users from admin interface
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     if request.method == 'POST':
         pw = request.form.get('password', '')
         if app.config['ADMIN_PASSWORD_HASH'] and check_password_hash(app.config['ADMIN_PASSWORD_HASH'], pw):
@@ -477,6 +498,11 @@ def admin_dashboard():
 @app.route('/upload/image', methods=['POST'])
 @limiter.limit("10 per hour")
 def upload_image():
+    # Block clearnet users from web upload form
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     if 'file' not in request.files or request.files['file'].filename == '':
         flash('No file selected.', 'error')
         return redirect(url_for('index', _anchor='image'))
@@ -514,6 +540,11 @@ def upload_image():
 @app.route('/upload/paste', methods=['POST'])
 @limiter.limit("20 per hour")
 def upload_paste():
+    # Block clearnet users from web upload form
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     content = request.form.get('content', '').strip()
     if not content:
         flash('Paste content cannot be empty.', 'error')
@@ -547,6 +578,11 @@ def upload_paste():
 
 @app.route('/image/<filename>', methods=['GET', 'POST'])
 def view_image(filename):
+    # Block clearnet users from viewing images via web interface
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     db = get_db()
     row = db.execute("SELECT * FROM images WHERE id = ?", (filename,)).fetchone()
 
@@ -575,6 +611,11 @@ def view_image(filename):
 
 @app.route('/paste/<paste_id>', methods=['GET', 'POST'])
 def view_paste(paste_id):
+    # Block clearnet users from viewing pastes via web interface
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     db = get_db()
     row = db.execute("SELECT * FROM pastes WHERE id = ?", (paste_id,)).fetchone()
 
@@ -630,6 +671,11 @@ def view_paste(paste_id):
 
 @app.route('/paste/<paste_id>/raw')
 def paste_raw(paste_id):
+    # Block clearnet users from raw paste access
+    block_check = block_clearnet_web_access()
+    if block_check:
+        return block_check
+        
     db = get_db()
     row = db.execute("SELECT * FROM pastes WHERE id = ?", (paste_id,)).fetchone()
 
