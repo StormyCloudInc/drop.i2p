@@ -140,6 +140,7 @@
       <div class="noscript-forms-container">
         <div id="image-form" class="content-container rounded-lg p-8 shadow-lg tab-content">
           <form action="/upload/image" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <h2 class="text-2xl font-semibold mb-6 text-white">Upload an Image</h2>
 
             <div class="mb-6">
@@ -195,6 +196,7 @@
 
         <div id="paste-form" class="content-container rounded-lg p-8 shadow-lg hidden tab-content">
           <form action="/upload/paste" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <h2 class="text-2xl font-semibold mb-6 text-white">Create a Paste</h2>
             <div class="mb-6">
               <label for="paste-content" class="block text-gray-300 text-sm font-bold mb-2">Paste Content:</label>

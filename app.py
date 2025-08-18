@@ -17,7 +17,7 @@ from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 # Note: For production, consider adding Flask-WTF for CSRF protection
-# from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect
 
 from PIL import Image
 from pygments import highlight
@@ -36,7 +36,7 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # Note: CSRF protection would be initialized here if Flask-WTF is available
-# csrf = CSRFProtect(app)
+csrf = CSRFProtect(app)
 
 
 app.config['SECRET_KEY'] = os.getenv('SSP_SECRET_KEY')
@@ -627,6 +627,7 @@ def delete_paste(paste_id):
 # --- API Routes ---
 @app.route('/api/upload/image', methods=['POST'])
 @limiter.limit("50 per hour")
+@csrf.exempt
 def api_upload_image():
     if 'file' not in request.files or request.files['file'].filename == '':
         return jsonify(error="No file selected"), 400
@@ -657,6 +658,7 @@ def api_upload_image():
 
 @app.route('/api/upload/paste', methods=['POST'])
 @limiter.limit("100 per hour")
+@csrf.exempt
 def api_upload_paste():
     if not request.is_json: return jsonify(error="Request must be JSON"), 400
         
