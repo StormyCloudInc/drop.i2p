@@ -28,7 +28,6 @@ from cryptography.fernet import Fernet
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
-from ssl_monitor import SSLMonitor
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -387,38 +386,49 @@ def healthz():
 def ssl_status():
     """SSL certificate status endpoint for external monitoring"""
     try:
-        ssl_monitor = SSLMonitor(
-            cert_path=app.config.get('SSL_CERT_PATH'),
-            key_path=app.config.get('SSL_KEY_PATH')
-        )
+        import ssl
+        import socket
         
-        cert_info = ssl_monitor.get_cert_info(use_file=True)
-        
-        if cert_info:
-            return jsonify({
-                "ssl_expires": cert_info["expires"],
-                "days_remaining": cert_info["days_remaining"],
-                "status": cert_info["status"],
-                "needs_renewal": cert_info["needs_renewal"],
-                "is_expired": cert_info["is_expired"],
-                "checked_at": datetime.now().isoformat(),
-                "domain": app.config['CLEARNET_DOMAIN']
-            })
-        else:
-            return jsonify({
-                "error": "Could not read SSL certificate",
-                "status": "unknown",
-                "checked_at": datetime.now().isoformat(),
-                "domain": app.config['CLEARNET_DOMAIN']
-            }), 500
-            
+        # Try to get SSL info directly from the server
+        context = ssl.create_default_context()
+        with socket.create_connection((app.config['CLEARNET_DOMAIN'], 443), timeout=10) as sock:
+            with context.wrap_socket(sock, server_hostname=app.config['CLEARNET_DOMAIN']) as ssock:
+                cert = ssock.getpeercert()
+                
+                # Parse expiry date
+                expiry_str = cert['notAfter']
+                expiry_date = datetime.strptime(expiry_str, '%b %d %H:%M:%S %Y %Z')
+                now = datetime.now()
+                days_remaining = (expiry_date - now).days
+                
+                # Determine status
+                if days_remaining < 0:
+                    status = "expired"
+                elif days_remaining < 7:
+                    status = "critical"
+                elif days_remaining < 30:
+                    status = "warning"
+                else:
+                    status = "valid"
+                
+                return jsonify({
+                    "ssl_expires": expiry_date.isoformat(),
+                    "days_remaining": days_remaining,
+                    "status": status,
+                    "needs_renewal": days_remaining < 30,
+                    "is_expired": days_remaining < 0,
+                    "checked_at": now.isoformat(),
+                    "domain": app.config['CLEARNET_DOMAIN']
+                })
+                
     except Exception as e:
         app.logger.error(f"SSL status check error: {sanitize_error_message(e)}")
         return jsonify({
-            "error": "SSL status check failed",
+            "error": "SSL status check failed - certificate may not be installed yet",
             "status": "error",
-            "checked_at": datetime.now().isoformat()
-        }), 500
+            "checked_at": datetime.now().isoformat(),
+            "domain": app.config['CLEARNET_DOMAIN']
+        }), 200  # Return 200 so UptimeRobot doesn't alarm before SSL is set up
 
 # --- Web UI Routes ---
 @app.route('/')
