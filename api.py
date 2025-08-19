@@ -17,7 +17,7 @@ import uvicorn
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash
 from cryptography.fernet import Fernet
-from PIL import Image
+from PIL import Image, ImageFile
 from io import BytesIO
 
 # Load environment variables from main .env file
@@ -164,6 +164,10 @@ app.add_middleware(PathRestrictionMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(BodySizeMiddleware)
 
+# Security: Prevent decompression bombs and truncated images
+ImageFile.LOAD_TRUNCATED_IMAGES = False
+Image.MAX_IMAGE_PIXELS = 25_000_000
+
 # Authentication
 security = HTTPBearer(auto_error=False)
 
@@ -209,30 +213,55 @@ def allowed_file(filename: str) -> bool:
 def process_and_encrypt_image(stream, orig_fn: str, keep_exif: bool = False) -> Optional[str]:
     """Process and encrypt image - mirror logic from app.py"""
     try:
-        img = Image.open(stream)
+        # Read all content from stream
+        raw = stream.read()
+        bio = BytesIO(raw)
+
+        # Verify integrity
+        with Image.open(bio) as probe:
+            probe.verify()
+
+        # Reopen for processing
+        bio2 = BytesIO(raw)
+        img = Image.open(bio2)
+
+        # Enforce format whitelist
+        allowed_formats = {'PNG', 'JPEG', 'JPG', 'GIF', 'WEBP', 'BMP', 'ICO', 'TIFF'}
+        fmt = (img.format or '').upper()
+        if fmt == 'JPG':
+            fmt = 'JPEG'
+        if fmt not in allowed_formats:
+            raise ValueError(f"Unsupported image format: {fmt}")
+
+        # Enforce dimension and pixel limits
+        max_side = 8000
+        max_pixels = 50_000_000
+        width, height = img.size
+        if width > max_side or height > max_side or (width * height) > max_pixels:
+            raise ValueError("Image dimensions too large")
+
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
-        
+
         buf = BytesIO()
         exif = img.info.get('exif') if keep_exif and 'exif' in img.info else None
-        
         save_params = {'quality': 80}
         if exif:
             save_params['exif'] = exif
-        
+
         img.save(buf, 'WEBP', **save_params)
         buf.seek(0)
         encrypted = fernet.encrypt(buf.read())
-        
+
         new_fn = f"{uuid.uuid4().hex}.webp"
         path = os.path.join(UPLOAD_FOLDER, new_fn)
-        
+
         # Ensure upload directory exists
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        
+
         with open(path, 'wb') as f:
             f.write(encrypted)
-        
+
         return new_fn
     except Exception as e:
         logger.error(f"Image processing failed ({orig_fn}): {e}")

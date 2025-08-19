@@ -14,7 +14,7 @@ from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from PIL import Image
+from PIL import Image, ImageFile
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
@@ -23,6 +23,7 @@ from cryptography.fernet import Fernet
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
+from flask_wtf.csrf import CSRFProtect
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -45,6 +46,12 @@ app.config['DATABASE_PATH'] = os.getenv('SSP_DATABASE_PATH', 'database.db')
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
 
 app.config['FLASK_DEBUG'] = os.getenv('SSP_FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
+
+# Strict cookies and CSRF config
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['WTF_CSRF_TIME_LIMIT'] = 3600
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tiff'}
 
@@ -69,6 +76,26 @@ limiter = Limiter(
 )
 
 fernet = Fernet(app.config['ENCRYPTION_KEY'])
+
+# Enable CSRF protection globally (templates must include {{ csrf_token() }})
+csrf = CSRFProtect(app)
+
+# Security: Prevent decompression bombs and truncated images
+ImageFile.LOAD_TRUNCATED_IMAGES = False
+Image.MAX_IMAGE_PIXELS = 25_000_000
+
+# Security headers for all responses
+@app.after_request
+def set_security_headers(resp: Response):
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('Referrer-Policy', 'no-referrer')
+    resp.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    # Minimal CSP compatible with current inline usage; migrate to nonces later
+    resp.headers.setdefault('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+    # HSTS (only if behind HTTPS/terminating proxy)
+    resp.headers.setdefault('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+    return resp
 
 # --- Expiry Map & Languages ---
 EXPIRY_MAP = {
@@ -124,6 +151,9 @@ def init_db():
         c.execute('CREATE TABLE IF NOT EXISTS stats (stat_key TEXT PRIMARY KEY, stat_value INTEGER NOT NULL)')
         for stat in ['total_images', 'total_pastes', 'total_api_uploads']:
             c.execute("INSERT OR IGNORE INTO stats(stat_key,stat_value) VALUES(?,0)", (stat,))
+        # Normalize historical negative view counts to 0 (old behavior initialized to -1)
+        c.execute("UPDATE images SET view_count = 0 WHERE view_count < 0")
+        c.execute("UPDATE pastes SET view_count = 0 WHERE view_count < 0")
         db.commit()
 
 def update_stat(key, inc=1):
@@ -174,20 +204,46 @@ def get_time_left(expiry_str):
 
 def process_and_encrypt_image(stream, orig_fn, keep_exif=False):
     try:
-        img = Image.open(stream)
+        # Read stream to bytes (bounded by MAX_CONTENT_LENGTH)
+        raw = stream.read()
+        bio = BytesIO(raw)
+
+        # Verify image integrity first
+        with Image.open(bio) as probe:
+            probe.verify()
+
+        # Reopen for processing
+        bio2 = BytesIO(raw)
+        img = Image.open(bio2)
+
+        # Enforce actual type whitelist via Pillow format
+        allowed_formats = {'PNG', 'JPEG', 'JPG', 'GIF', 'WEBP', 'BMP', 'ICO', 'TIFF'}
+        fmt = (img.format or '').upper()
+        if fmt == 'JPG':
+            fmt = 'JPEG'
+        if fmt not in allowed_formats:
+            raise ValueError(f"Unsupported image format: {fmt}")
+
+        # Enforce sane dimensions to mitigate resource abuse
+        max_side = 8000
+        max_pixels = 50_000_000  # 50 MP
+        width, height = img.size
+        if width > max_side or height > max_side or (width * height) > max_pixels:
+            raise ValueError("Image dimensions too large")
+
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
         buf = BytesIO()
         exif = img.info.get('exif') if keep_exif and 'exif' in img.info else None
-        
+
         save_params = {'quality': 80}
         if exif:
             save_params['exif'] = exif
-        
+
         img.save(buf, 'WEBP', **save_params)
         buf.seek(0)
         encrypted = fernet.encrypt(buf.read())
-        
+
         new_fn = f"{uuid.uuid4().hex}.webp"
         path = os.path.join(app.config['UPLOAD_FOLDER'], new_fn)
         with open(path, 'wb') as f:
@@ -292,7 +348,7 @@ def admin_dashboard():
     return render_template('admin.html', auth_success=True, images=images, pastes=pastes)
 
 @app.route('/upload/image', methods=['POST'])
-@limiter.limit("10 per hour")
+@limiter.limit("100 per hour")
 def upload_image():
     if 'file' not in request.files or request.files['file'].filename == '':
         flash('No file selected.', 'error')
@@ -316,7 +372,7 @@ def upload_image():
         db = get_db()
         db.execute(
             'INSERT INTO images (id, upload_date, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?)',
-            (new_fn, now, expiry, pw_hash, mv, -1)
+            (new_fn, now, expiry, pw_hash, mv, 0)
         )
         db.commit()
         update_stat('total_images')
@@ -324,12 +380,12 @@ def upload_image():
         flash('Image uploaded successfully! This is your shareable link.', 'success')
         return redirect(url_for('view_image', filename=new_fn))
 
-    flash('Invalid file type.', 'error')
+    flash('Invalid or unsupported image file.', 'error')
     return redirect(url_for('index', _anchor='image'))
 
 
 @app.route('/upload/paste', methods=['POST'])
-@limiter.limit("20 per hour")
+@limiter.limit("200 per hour")
 def upload_paste():
     content = request.form.get('content', '').strip()
     if not content:
@@ -348,7 +404,7 @@ def upload_paste():
     db = get_db()
     db.execute(
         'INSERT INTO pastes (id, content, language, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (paste_id, encrypted, request.form.get('language', 'text'), expiry, pw_hash, mv, -1)
+        (paste_id, encrypted, request.form.get('language', 'text'), expiry, pw_hash, mv, 0)
     )
     db.commit()
     update_stat('total_pastes')
@@ -358,6 +414,7 @@ def upload_paste():
 
 
 @app.route('/image/<filename>', methods=['GET', 'POST'])
+@limiter.limit("1000 per hour")
 def view_image(filename):
     db = get_db()
     row = db.execute("SELECT * FROM images WHERE id = ?", (filename,)).fetchone()
@@ -385,6 +442,7 @@ def view_image(filename):
 
 
 @app.route('/paste/<paste_id>', methods=['GET', 'POST'])
+@limiter.limit("1000 per hour")
 def view_paste(paste_id):
     db = get_db()
     row = db.execute("SELECT * FROM pastes WHERE id = ?", (paste_id,)).fetchone()
@@ -409,12 +467,27 @@ def view_paste(paste_id):
         db.commit()
         abort(410)
 
-    # Only increment view count on the initial, non-overridden view
-    if 'lang' not in request.args:
+    # Decrypt content before potential deletion
+    content = fernet.decrypt(row['content']).decode('utf-8')
+
+    # Increment view count once per session for the paste to prevent URL param bypass
+    session_flag = f'viewed_{paste_id}'
+    incremented = False
+    if not session.get(session_flag):
         db.execute("UPDATE pastes SET view_count = view_count + 1 WHERE id = ?", (paste_id,))
         db.commit()
+        session[session_flag] = True
+        incremented = True
 
-    content = fernet.decrypt(row['content']).decode('utf-8')
+    # After increment, if this view reaches the max, delete now (but still serve content)
+    if row['max_views'] is not None:
+        current_count = row['view_count'] + (1 if incremented else 0)
+        if current_count >= row['max_views']:
+            try:
+                db.execute("DELETE FROM pastes WHERE id = ?", (paste_id,))
+                db.commit()
+            except Exception as e:
+                app.logger.error(f"Error deleting paste {paste_id} after reaching max views: {e}")
     
     # Get the language, allowing for a user override via URL parameter
     default_language = row['language']
@@ -439,6 +512,7 @@ def view_paste(paste_id):
 
 
 @app.route('/paste/<paste_id>/raw')
+@limiter.limit("2000 per hour")
 def paste_raw(paste_id):
     db = get_db()
     row = db.execute("SELECT * FROM pastes WHERE id = ?", (paste_id,)).fetchone()
@@ -454,14 +528,33 @@ def paste_raw(paste_id):
         db.commit()
         abort(410)
 
-    db.execute("UPDATE pastes SET view_count = view_count + 1 WHERE id = ?", (paste_id,))
-    db.commit()
-
+    # Decrypt before potential deletion
     text = fernet.decrypt(row['content']).decode('utf-8')
+
+    # Count raw view once per session as well to avoid double-counting with HTML view
+    session_flag = f'viewed_{paste_id}'
+    incremented = False
+    if not session.get(session_flag):
+        db.execute("UPDATE pastes SET view_count = view_count + 1 WHERE id = ?", (paste_id,))
+        db.commit()
+        session[session_flag] = True
+        incremented = True
+
+    # Delete if this view meets/exceeds max
+    if row['max_views'] is not None:
+        current_count = row['view_count'] + (1 if incremented else 0)
+        if current_count >= row['max_views']:
+            try:
+                db.execute("DELETE FROM pastes WHERE id = ?", (paste_id,))
+                db.commit()
+            except Exception as e:
+                app.logger.error(f"Error deleting paste {paste_id} after reaching max views (raw): {e}")
+
     return Response(text, mimetype='text/plain')
 
 
 @app.route('/uploads/<filename>')
+@limiter.limit("2000 per hour")
 def get_upload(filename):
     safe_fn = secure_filename(filename)
     path = os.path.join(app.config['UPLOAD_FOLDER'], safe_fn)
@@ -485,17 +578,35 @@ def get_upload(filename):
         os.remove(path)
         abort(410)
 
-    db.execute("UPDATE images SET view_count = view_count + 1 WHERE id = ?", (safe_fn,))
-    db.commit()
-
+    # Read and decrypt image before modifying DB/file
     try:
         with open(path, 'rb') as f:
             encrypted = f.read()
         data = fernet.decrypt(encrypted)
-        return send_file(BytesIO(data), mimetype='image/webp')
     except Exception as e:
-        app.logger.error(f"Error serving image {safe_fn}: {e}")
+        app.logger.error(f"Error reading/decrypting image {safe_fn}: {e}")
         abort(500)
+
+    # Increment count
+    db.execute("UPDATE images SET view_count = view_count + 1 WHERE id = ?", (safe_fn,))
+    db.commit()
+
+    # If reached max views, delete row and file, but still serve this response
+    if row['max_views'] is not None:
+        new_count = row['view_count'] + 1
+        if new_count >= row['max_views']:
+            try:
+                db.execute("DELETE FROM images WHERE id = ?", (safe_fn,))
+                db.commit()
+            except Exception as e:
+                app.logger.error(f"Error deleting image row {safe_fn} after reaching max views: {e}")
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as e:
+                app.logger.error(f"Error removing image file {path} after reaching max views: {e}")
+
+    return send_file(BytesIO(data), mimetype='image/webp')
 
 @app.route('/admin/delete/image/<filename>', methods=['POST'])
 def delete_image(filename):
@@ -525,8 +636,9 @@ def delete_paste(paste_id):
     return redirect(url_for('admin_dashboard'))
 
 # --- API Routes ---
+@csrf.exempt
 @app.route('/api/upload/image', methods=['POST'])
-@limiter.limit("50 per hour")
+@limiter.limit("500 per hour")
 def api_upload_image():
     if 'file' not in request.files or request.files['file'].filename == '':
         return jsonify(error="No file selected"), 400
@@ -546,7 +658,7 @@ def api_upload_image():
         db = get_db()
         db.execute(
             'INSERT INTO images (id, upload_date, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?)',
-            (new_fn, now, expiry, pw_hash, mv, -1)
+            (new_fn, now, expiry, pw_hash, mv, 0)
         )
         db.commit()
         update_stat('total_api_uploads')
@@ -555,8 +667,9 @@ def api_upload_image():
     return jsonify(error="Invalid file type"), 400
 
 
+@csrf.exempt
 @app.route('/api/upload/paste', methods=['POST'])
-@limiter.limit("100 per hour")
+@limiter.limit("1000 per hour")
 def api_upload_paste():
     if not request.is_json: return jsonify(error="Request must be JSON"), 400
         
@@ -576,7 +689,7 @@ def api_upload_paste():
     db = get_db()
     db.execute(
         'INSERT INTO pastes (id, content, language, expiry_date, password_hash, max_views, view_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (paste_id, encrypted, data.get('language', 'text'), expiry, pw_hash, mv, -1)
+        (paste_id, encrypted, data.get('language', 'text'), expiry, pw_hash, mv, 0)
     )
     db.commit()
     update_stat('total_api_uploads')
