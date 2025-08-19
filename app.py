@@ -27,6 +27,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from cryptography.fernet import Fernet
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import threading
+import time
+import logging
+import json
 from dotenv import load_dotenv
 
 # Load environment variables from a .env file
@@ -61,7 +65,19 @@ app.config['ENCRYPTION_KEY'] = enc_key.encode('utf-8')
 
 app.config['UPLOAD_FOLDER'] = os.getenv('SSP_UPLOAD_FOLDER', 'uploads')
 app.config['DATABASE_PATH'] = os.getenv('SSP_DATABASE_PATH', 'database.db')
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
+def _to_int(default_val, env_val):
+    try:
+        return int(env_val)
+    except Exception:
+        return default_val
+
+# Max upload size (in MB) via env, default 25MB
+max_mb_env = os.getenv('MAX_UPLOAD_MB', '25')
+app.config['MAX_CONTENT_LENGTH'] = _to_int(25, max_mb_env) * 1024 * 1024
+
+# API key and domain from env
+app.config['API_KEY'] = os.getenv('API_KEY')
+app.config['DOMAIN'] = os.getenv('DOMAIN', app.config.get('CLEARNET_DOMAIN', 'drop.stormycloud.org'))
 
 # Ensure debug mode is never enabled in production
 debug_env = os.getenv('SSP_FLASK_DEBUG', 'False').lower()
@@ -81,7 +97,8 @@ SAFE_FILENAME_REGEX = re.compile(r'^[a-zA-Z0-9._-]+$')
 def is_clearnet_request():
     """Detect if request is coming from clearnet domain"""
     host = request.headers.get('Host', '').lower()
-    return app.config['CLEARNET_DOMAIN'].lower() in host
+    clearnet_host = app.config.get('CLEARNET_DOMAIN') or app.config.get('DOMAIN') or ''
+    return clearnet_host.lower() in host
 
 def is_i2p_request():
     """Detect if request is coming from I2P domain"""
@@ -112,7 +129,7 @@ def block_clearnet_web_access():
 def get_appropriate_base_url():
     """Get the appropriate base URL based on request source"""
     if is_clearnet_request():
-        return f"https://{app.config['CLEARNET_DOMAIN']}"
+        return f"https://{app.config.get('CLEARNET_DOMAIN') or app.config.get('DOMAIN')}"
     else:
         return f"http://{app.config['I2P_DOMAIN']}"
 
@@ -137,6 +154,7 @@ def smart_key_func():
 limiter = Limiter(
     app=app,
     key_func=smart_key_func,
+    # Keep conservative global defaults; API-specific limiter below enforces 10 rps
     default_limits=["200 per day", "50 per hour"],
     storage_uri="memory://"
 )
@@ -151,6 +169,134 @@ def clearnet_rate_limit(limit_string):
     return decorator
 
 fernet = Fernet(app.config['ENCRYPTION_KEY'])
+
+# --- Security headers ---
+@app.after_request
+def add_security_headers(resp):
+    resp.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains; preload'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    resp.headers['Permissions-Policy'] = "camera=(), microphone=(), geolocation=()"
+    resp.headers['Content-Security-Policy'] = "default-src 'none'"
+    return resp
+
+# --- Logging filter to scrub sensitive headers ---
+class RedactAuthFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            msg = str(record.getMessage())
+            if 'Authorization' in msg:
+                msg = msg.replace(request.headers.get('Authorization', ''), 'REDACTED')
+            if 'X-API-Key' in msg:
+                msg = msg.replace(request.headers.get('X-API-Key', ''), 'REDACTED')
+            record.msg = msg
+        except Exception:
+            pass
+        return True
+
+app.logger.addFilter(RedactAuthFilter())
+
+# --- API key authentication (clearnet /api/* only) ---
+def _extract_bearer_token(auth_header):
+    if not auth_header:
+        return None
+    parts = auth_header.split()
+    if len(parts) == 2 and parts[0].lower() == 'bearer':
+        return parts[1]
+    return None
+
+def _get_client_ip():
+    fwd = request.headers.get('X-Forwarded-For')
+    if fwd:
+        return fwd.split(',')[0].strip()
+    return request.remote_addr or 'unknown'
+
+# Simple token-bucket per-IP for API: 10 req/s with burst 20
+_rate_lock = threading.Lock()
+_buckets = {}
+_RATE_PER_SEC = 10.0
+_BURST = 20.0
+
+def _rate_limit_check():
+    if not request.path.startswith('/api/'):
+        return True
+    ip = _get_client_ip()
+    now = time.time()
+    with _rate_lock:
+        bucket = _buckets.get(ip)
+        if not bucket:
+            bucket = {'tokens': _BURST, 'last': now}
+            _buckets[ip] = bucket
+        # Refill
+        elapsed = max(0.0, now - bucket['last'])
+        bucket['tokens'] = min(_BURST, bucket['tokens'] + elapsed * _RATE_PER_SEC)
+        bucket['last'] = now
+        if bucket['tokens'] >= 1.0:
+            bucket['tokens'] -= 1.0
+            return True
+        return False
+
+def _unauthorized_response():
+    resp = jsonify({"detail": "Unauthorized"})
+    resp.status_code = 401
+    resp.headers['WWW-Authenticate'] = 'Bearer'
+    return resp
+
+def _forbidden_response():
+    return jsonify({"detail": "Forbidden"}), 403
+
+@app.before_request
+def clearnet_api_enforcement():
+    # Scrub sensitive inbound headers from being logged downstream
+    try:
+        if 'HTTP_AUTHORIZATION' in request.environ:
+            request.environ['HTTP_AUTHORIZATION'] = 'REDACTED'
+        if 'HTTP_X_API_KEY' in request.environ:
+            request.environ['HTTP_X_API_KEY'] = 'REDACTED'
+    except Exception:
+        pass
+
+    host = (request.headers.get('Host') or '').lower()
+    clearnet_host = (app.config.get('CLEARNET_DOMAIN') or app.config.get('DOMAIN') or '').lower()
+    i2p_host = (app.config.get('I2P_DOMAIN') or '').lower()
+
+    # Deny unknown hosts entirely (except ssl-status) to avoid accidental exposure via IP/other hostnames
+    if host and host not in {clearnet_host, i2p_host} and request.path != '/ssl-status':
+        return _forbidden_response()
+
+    if not is_clearnet_request():
+        return None
+
+    # Allow public SSL status
+    if request.path == '/ssl-status':
+        return None
+
+    # Default deny for non-API on clearnet
+    if not request.path.startswith('/api/'):
+        # Always return JSON for clearnet non-API
+        return _forbidden_response()
+
+    # API paths: enforce API key and rate limit
+    if not _rate_limit_check():
+        return jsonify({"detail": "Too Many Requests"}), 429
+
+    configured_key = app.config.get('API_KEY')
+    # Backward compatibility: fall back to existing MOBILE_API_KEY if API_KEY not set
+    if not configured_key:
+        configured_key = app.config.get('MOBILE_API_KEY')
+
+    if not configured_key:
+        # If no key configured, require one as per spec: deny
+        return _unauthorized_response()
+
+    auth_header = request.headers.get('Authorization')
+    token = _extract_bearer_token(auth_header)
+    x_api = request.headers.get('X-API-Key')
+    supplied = token or x_api
+
+    if not supplied or supplied != configured_key:
+        return _unauthorized_response()
+    return None
 
 # --- Expiry Map & Languages ---
 EXPIRY_MAP = {
@@ -361,8 +507,8 @@ def gone(e):
 @app.errorhandler(413)
 def too_large(e):
     if request.path.startswith('/api/'):
-        return jsonify(error="File is too large (max 10MB)."), 413
-    flash('File is too large (max 10MB).', 'error')
+        return jsonify(error=f"File is too large (max {int(app.config['MAX_CONTENT_LENGTH']/(1024*1024))}MB)."), 413
+    flash(f"File is too large (max {int(app.config['MAX_CONTENT_LENGTH']/(1024*1024))}MB).", 'error')
     return redirect(url_for('index'))
 
 @app.errorhandler(429)
@@ -390,51 +536,13 @@ def healthz():
 # --- SSL Status Monitoring for UptimeRobot ---
 @app.route('/ssl-status')
 def ssl_status():
-    """SSL certificate status endpoint for external monitoring"""
-    try:
-        import ssl
-        import socket
-        
-        # Try to get SSL info directly from the server
-        context = ssl.create_default_context()
-        with socket.create_connection((app.config['CLEARNET_DOMAIN'], 443), timeout=10) as sock:
-            with context.wrap_socket(sock, server_hostname=app.config['CLEARNET_DOMAIN']) as ssock:
-                cert = ssock.getpeercert()
-                
-                # Parse expiry date
-                expiry_str = cert['notAfter']
-                expiry_date = datetime.strptime(expiry_str, '%b %d %H:%M:%S %Y %Z')
-                now = datetime.now()
-                days_remaining = (expiry_date - now).days
-                
-                # Determine status
-                if days_remaining < 0:
-                    status = "expired"
-                elif days_remaining < 7:
-                    status = "critical"
-                elif days_remaining < 30:
-                    status = "warning"
-                else:
-                    status = "valid"
-                
-                return jsonify({
-                    "ssl_expires": expiry_date.isoformat(),
-                    "days_remaining": days_remaining,
-                    "status": status,
-                    "needs_renewal": days_remaining < 30,
-                    "is_expired": days_remaining < 0,
-                    "checked_at": now.isoformat(),
-                    "domain": app.config['CLEARNET_DOMAIN']
-                })
-                
-    except Exception as e:
-        app.logger.error(f"SSL status check error: {sanitize_error_message(e)}")
-        return jsonify({
-            "error": "SSL status check failed - certificate may not be installed yet",
-            "status": "error",
-            "checked_at": datetime.now().isoformat(),
-            "domain": app.config['CLEARNET_DOMAIN']
-        }), 200  # Return 200 so UptimeRobot doesn't alarm before SSL is set up
+    # Public, non-auth endpoint for UptimeRobot SSL monitoring
+    return Response("ok", mimetype='text/plain')
+
+# Auth-required API health
+@app.route('/api/health')
+def api_health():
+    return jsonify(status="ok"), 200
 
 # --- Web UI Routes ---
 @app.route('/')
