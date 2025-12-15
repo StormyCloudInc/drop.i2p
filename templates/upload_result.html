@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Successful - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <style>
+        .result-box {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 0.5rem 1.5rem;
+            font-size: 0.9rem;
+        }
+
+        .info-label {
+            color: var(--text-muted);
+        }
+
+        .info-value {
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        .link-input-group {
+            display: flex;
+            gap: 0.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.8rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            margin-top: 0.5rem;
+        }
+
+        .link-input-group input {
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            width: 100%;
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container">
+
+            <header class="header-section">
+                <h1 style="color: var(--success); text-shadow: 0 0 20px rgba(74, 222, 128, 0.2);">Upload Successful!
+                </h1>
+            </header>
+
+            <main>
+                <div class="glass-panel" style="padding: 2rem;">
+
+                    <div class="result-box">
+                        <h2 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--text-accent);">File Information
+                        </h2>
+                        <div class="info-grid">
+                            <span class="info-label">Filename:</span>
+                            <span class="info-value">{{.OriginalFilename}}</span>
+
+                            <span class="info-label">Size:</span>
+                            <span class="info-value">{{.File.Size}} bytes</span>
+
+                            <span class="info-label">Type:</span>
+                            <span class="info-value">{{.File.MimeType}}</span>
+
+                            <span class="info-label">Expires:</span>
+                            <span class="info-value">{{if .Permanent}}Never{{else}}{{.File.ExpiryTime}}{{end}}</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h2 style="font-size: 1.1rem; margin-bottom: 0.5rem;">Download Link</h2>
+                        <div class="link-input-group" style="border-color: rgba(56, 189, 248, 0.3);">
+                            <input type="text" value="http://{{.Host}}/f/{{.File.ID}}" readonly onclick="this.select()">
+                            <a href="/f/{{.File.ID}}" target="_blank" class="btn"
+                                style="padding: 0.2rem 0.6rem; font-size: 0.8rem; text-decoration: none;">Open</a>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h2 style="font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--error);">Deletion Link <span
+                                style="font-size: 0.8rem; opacity: 0.8;">(SAVE THIS!)</span></h2>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.5rem;">You can use this
+                            link to delete the file at any time.</p>
+                        <div class="link-input-group" style="border-color: rgba(248, 113, 113, 0.3);">
+                            <input type="text" value="http://{{.Host}}/d/{{.File.ID}}/{{.DeleteToken}}" readonly
+                                onclick="this.select()" style="color: var(--error);">
+                        </div>
+                    </div>
+
+                    <div class="text-center">
+                        <a href="/" class="btn btn-primary">Upload Another File</a>
+                    </div>
+
+                </div>
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>

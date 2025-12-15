@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View File - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <style>
+        .file-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+
+        .download-box {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: var(--radius-sm);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .download-box input {
+            background: transparent;
+            border: none;
+            font-family: monospace;
+            color: var(--text-muted);
+            width: 100%;
+        }
+
+        .report-section {
+            margin-top: 2rem;
+            border-top: 1px solid var(--border-color);
+            padding-top: 2rem;
+            text-align: center;
+        }
+
+        .report-form {
+            max-width: 400px;
+            margin: 1rem auto;
+            text-align: left;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container">
+
+            <header class="header-section">
+                <a href="/" style="display: inline-block; margin-bottom: 1.5rem;">
+                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 60px;">
+                </a>
+                <h1>File Download</h1>
+                {{if .TimeLeft}}
+                <p style="color: var(--text-muted);">Expires in: <span
+                        style="color: var(--warning);">{{.TimeLeft}}</span></p>
+                {{else}}
+                <p style="color: var(--success); font-weight: bold;">Permanent File</p>
+                {{end}}
+            </header>
+
+            <main>
+                {{if .Flash}}
+                <div class="alert alert-{{.FlashType}}">
+                    {{.Flash}}
+                </div>
+                {{end}}
+
+                <div class="glass-panel" style="padding: 2rem;">
+
+                    {{if .NeedsPassword}}
+                    <div style="text-align: center; padding: 2rem;">
+                        <div class="file-icon">🔒</div>
+                        <h2 class="mb-4">Protected File</h2>
+                        <p style="margin-bottom: 2rem; color: var(--text-muted);">This file is encrypted with a
+                            password.</p>
+
+                        <form action="/view/{{.File.ID}}/unlock" method="POST"
+                            style="max-width: 300px; margin: 0 auto;">
+                            <input type="password" name="password" placeholder="Enter Password" required autofocus
+                                style="margin-bottom: 1rem;">
+                            <button type="submit" class="btn btn-primary w-full">Unlock</button>
+                        </form>
+                    </div>
+                    {{else}}
+
+                    <div style="text-align: center; margin-bottom: 2rem;">
+                        {{if .IsImage}}
+                        <img src="/f/{{.File.ID}}" alt="{{.File.Filename}}" class="thumbnail">
+                        {{else}}
+                        <div class="file-icon">
+                            {{if eq .FileType "pdf"}}📄{{else if eq .FileType "archive"}}📦{{else if eq .FileType
+                            "video"}}🎬{{else if eq .FileType "audio"}}🎵{{else}}📁{{end}}
+                        </div>
+                        {{end}}
+
+                        <h2 style="font-size: 1.5rem; overflow-wrap: break-word;">{{.File.Filename}}</h2>
+                        <p style="color: var(--text-muted); margin-top: 0.5rem;">{{.FileSizeFormatted}} •
+                            {{.File.MimeType}}</p>
+
+                        {{if .MaxDownloads}}
+                        <p style="margin-top: 0.5rem; font-size: 0.9rem;">
+                            Downloads: <span style="color: var(--text-main); font-weight: bold;">{{.DownloadCount}} /
+                                {{.MaxDownloads}}</span>
+                        </p>
+                        {{end}}
+                    </div>
+
+                    <div class="download-box">
+                        <span style="color: var(--text-muted); font-size: 0.9rem; white-space: nowrap;">Link:</span>
+                        <input type="text" id="download-link" value="{{.Host}}/f/{{.File.ID}}" readonly
+                            onclick="this.select()">
+                        <button id="copy-button" class="btn"
+                            style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(56, 189, 248, 0.2); color: var(--primary);">Copy</button>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <a href="/f/{{.File.ID}}" download="{{.File.Filename}}" class="btn btn-primary"
+                            style="text-decoration: none;">Download File</a>
+                        {{if .ShowDeleteButton}}
+                        <a href="/d/{{.File.ID}}/{{.DeleteToken}}" class="btn btn-danger"
+                            onclick="return confirm('Delete this file?');" style="text-decoration: none;">Delete
+                            File</a>
+                        {{end}}
+                    </div>
+
+                    {{if .ShowDeleteButton}}
+                    <div class="download-box" style="margin-top: 1.5rem; border-color: rgba(248, 113, 113, 0.3);">
+                        <span style="color: var(--error); font-size: 0.9rem; white-space: nowrap;">Delete Link:</span>
+                        <input type="text" id="delete-link" value="{{.Host}}/d/{{.File.ID}}/{{.DeleteToken}}" readonly
+                            onclick="this.select()" style="color: var(--error);">
+                        <button id="copy-delete-button" class="btn"
+                            style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(248, 113, 113, 0.1); color: var(--error);">Copy</button>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--warning); text-align: center; margin-top: 0.5rem;">Save
+                        the delete link! It won't be shown again.</p>
+                    {{end}}
+
+                    <div class="report-section">
+                        <button id="show-report-form" class="btn"
+                            style="background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.9rem;">Report
+                            Abuse</button>
+
+                        <div id="report-form" class="report-form hidden">
+                            <form id="report-submit-form">
+                                <input type="hidden" name="file_id" value="{{.File.ID}}">
+                                <div class="mb-4">
+                                    <label>Reason</label>
+                                    <select name="reason">
+                                        <option value="illegal">Illegal content</option>
+                                        <option value="malware">Malware/Virus</option>
+                                        <option value="copyright">Copyright violation</option>
+                                        <option value="spam">Spam</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-danger w-full">Submit Report</button>
+                                <p id="report-status" style="margin-top: 1rem; font-size: 0.9rem; text-align: center;">
+                                </p>
+                            </form>
+                        </div>
+                    </div>
+
+                    {{end}}
+                </div>
+
+                <div class="text-center mt-8">
+                    <a href="/" style="color: var(--primary);">Upload another file</a>
+                </div>
+
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        // Copy functionality
+        function setupCopy(btnId, inputId) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            btn.addEventListener('click', () => {
+                const inp = document.getElementById(inputId);
+                inp.select();
+                document.execCommand('copy');
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = originalText, 2000);
+            });
+        }
+        setupCopy('copy-button', 'download-link');
+        setupCopy('copy-delete-button', 'delete-link');
+
+        // Report form toggle
+        const showReportBtn = document.getElementById('show-report-form');
+        const reportForm = document.getElementById('report-form');
+        if (showReportBtn && reportForm) {
+            showReportBtn.addEventListener('click', () => {
+                reportForm.classList.toggle('hidden');
+            });
+        }
+
+        // Report submission
+        const reportSubmitForm = document.getElementById('report-submit-form');
+        if (reportSubmitForm) {
+            reportSubmitForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const formData = new FormData(reportSubmitForm);
+                const status = document.getElementById('report-status');
+
+                try {
+                    const response = await fetch('/api/report', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            file_id: formData.get('file_id'),
+                            reason: formData.get('reason')
+                        })
+                    });
+
+                    if (response.ok) {
+                        status.textContent = 'Report submitted. Thank you.';
+                        status.style.color = 'var(--success)';
+                        reportSubmitForm.reset();
+                        setTimeout(() => reportForm.classList.add('hidden'), 2000);
+                    } else {
+                        status.textContent = 'Failed to submit report.';
+                        status.style.color = 'var(--error)';
+                    }
+                } catch (err) {
+                    status.textContent = 'Error submitting report.';
+                    status.style.color = 'var(--error)';
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

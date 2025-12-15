@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <style>
+        .error-icon {
+            font-size: 5rem;
+            margin-bottom: 1.5rem;
+            text-shadow: var(--shadow-glow);
+        }
+
+        .details-box {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 1rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin: 1.5rem 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container" style="max-width: 600px;">
+
+            <header class="text-center mb-8">
+                <a href="/" style="display: inline-block; margin-bottom: 2rem;">
+                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 60px;">
+                </a>
+            </header>
+
+            <main>
+                <div class="glass-panel text-center" style="padding: 3rem 2rem;">
+                    <div class="error-icon">{{.Icon}}</div>
+                    <h1 style="color: var(--text-main); margin-bottom: 1rem;">{{.Title}}</h1>
+                    <p style="color: var(--text-muted); font-size: 1.1rem; line-height: 1.6;">{{.Message}}</p>
+
+                    {{if .Details}}
+                    <div class="details-box">
+                        {{.Details}}
+                    </div>
+                    {{end}}
+
+                    <div style="margin-top: 2rem;">
+                        <a href="/" class="btn btn-primary" style="padding: 0.8rem 2rem; font-size: 1rem;">Go to
+                            Homepage</a>
+                    </div>
+                </div>
+
+                <div class="text-center mt-8">
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">
+                        Need to report content? <a href="/report" style="color: var(--primary);">Submit a report</a>
+                    </p>
+                </div>
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>

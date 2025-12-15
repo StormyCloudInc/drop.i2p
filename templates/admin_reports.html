@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Reports - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container" style="max-width: 1400px;">
+
+            <header class="header-section">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="text-align: left;">
+                        <a href="/" style="display: inline-block; margin-bottom: 0.5rem;">
+                            <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 40px;">
+                        </a>
+                        <h1>Admin Dashboard</h1>
+                    </div>
+                    <div>
+                        <a href="/" class="btn">Back to Home</a>
+                    </div>
+                </div>
+            </header>
+
+            <main>
+                {{if .Flash}}
+                <div class="alert alert-{{.FlashType}}">
+                    {{.Flash}}
+                </div>
+                {{end}}
+
+                <div class="admin-nav">
+                    <a href="/admin">Files</a>
+                    <a href="/admin/reports" class="active">Reports</a>
+                    <a href="/admin/bans">Bans</a>
+                    <a href="/admin/tools">Tools</a>
+                </div>
+
+                <div class="glass-panel" style="padding: 0;">
+                    <h3 style="padding: 1rem; border-bottom: 1px solid var(--border-color);">Pending Reports</h3>
+                    {{if .Reports}}
+                    <div style="overflow-x: auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>File ID</th>
+                                    <th>Reason</th>
+                                    <th>Reporter</th>
+                                    <th>Reported At</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Reports}}
+                                <tr>
+                                    <td>
+                                        <a href="/f/{{.FileID}}" target="_blank"
+                                            style="color: var(--primary);">{{.FileID}}</a>
+                                    </td>
+                                    <td>{{.Reason}}</td>
+                                    <td>
+                                        <span class="text-truncate" title="{{.ReporterDest}}">
+                                            {{if .ReporterDest}}{{.ReporterDest}}{{else}}Anonymous{{end}}
+                                        </span>
+                                    </td>
+                                    <td>{{.CreatedAt.Format "Jan 02 15:04"}}</td>
+                                    <td>
+                                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                                class="action-form">
+                                                <input type="hidden" name="action" value="dismiss">
+                                                <button class="tag tag-blue">Dismiss</button>
+                                            </form>
+                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                                class="action-form" onsubmit="return confirm('Delete this file?');">
+                                                <input type="hidden" name="action" value="delete_file">
+                                                <button class="tag tag-red">Delete File</button>
+                                            </form>
+                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                                class="action-form" onsubmit="return confirm('Ban hash?');">
+                                                <input type="hidden" name="action" value="ban_hash">
+                                                <button class="tag tag-orange">Ban Hash</button>
+                                            </form>
+                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                                class="action-form" onsubmit="return confirm('Ban uploader?');">
+                                                <input type="hidden" name="action" value="ban_uploader">
+                                                <button class="tag tag-red">Ban Uploader</button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+                    {{else}}
+                    <div style="padding: 3rem; text-align: center; color: var(--text-muted);">
+                        No pending reports.
+                    </div>
+                    {{end}}
+                </div>
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>

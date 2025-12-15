@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <style>
+        .message-icon {
+            font-size: 4rem;
+            margin-bottom: 1.5rem;
+            text-shadow: var(--shadow-glow);
+        }
+
+        .icon-success {
+            color: var(--success);
+        }
+
+        .icon-error {
+            color: var(--error);
+        }
+
+        .icon-warning {
+            color: var(--warning);
+        }
+
+        .icon-info {
+            color: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container" style="max-width: 600px;">
+
+            <header class="text-center mb-8">
+                <a href="/" style="display: inline-block; margin-bottom: 2rem;">
+                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 60px;">
+                </a>
+            </header>
+
+            <main>
+                <div class="glass-panel text-center" style="padding: 3rem 2rem;">
+                    {{if eq .Type "success"}}
+                    <div class="message-icon icon-success">✔</div>
+                    {{else if eq .Type "error"}}
+                    <div class="message-icon icon-error">✖</div>
+                    {{else if eq .Type "warning"}}
+                    <div class="message-icon icon-warning">⚠</div>
+                    {{else}}
+                    <div class="message-icon icon-info">ℹ</div>
+                    {{end}}
+
+                    <h1 style="color: var(--text-main); margin-bottom: 1rem;">{{.Title}}</h1>
+                    <p style="color: var(--text-muted); font-size: 1.1rem; line-height: 1.6; margin-bottom: 2rem;">
+                        {{.Message}}</p>
+
+                    <div>
+                        <a href="/" class="btn btn-primary" style="padding: 0.8rem 2rem; font-size: 1rem;">Back to
+                            Home</a>
+                    </div>
+                </div>
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>
