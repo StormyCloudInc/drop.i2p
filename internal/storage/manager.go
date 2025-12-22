@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -36,9 +38,23 @@ type UploadOptions struct {
 	MetadataStripped bool
 }
 
+// PhotoDNAChecker interface for image content checking
+type PhotoDNAChecker interface {
+	ShouldCheck(mimeType string) bool
+	CheckImage(ctx context.Context, imageData []byte) (blocked bool, err error)
+}
+
+// ClamAVChecker interface for virus/malware scanning
+type ClamAVChecker interface {
+	ShouldCheck(mimeType string) bool
+	CheckFile(ctx context.Context, data []byte) (infected bool, threat string, err error)
+}
+
 type Manager struct {
 	cfg        *config.Config
 	keyManager *crypto.KeyManager
+	photoDNA   PhotoDNAChecker
+	clamAV     ClamAVChecker
 }
 
 func NewManager(cfg *config.Config) *Manager {
@@ -48,6 +64,16 @@ func NewManager(cfg *config.Config) *Manager {
 // NewManagerWithKeys creates a Manager with hybrid PQ encryption support
 func NewManagerWithKeys(cfg *config.Config, km *crypto.KeyManager) *Manager {
 	return &Manager{cfg: cfg, keyManager: km}
+}
+
+// SetPhotoDNAChecker sets the PhotoDNA checker for image content scanning
+func (m *Manager) SetPhotoDNAChecker(checker PhotoDNAChecker) {
+	m.photoDNA = checker
+}
+
+// SetClamAVChecker sets the ClamAV checker for virus/malware scanning
+func (m *Manager) SetClamAVChecker(checker ClamAVChecker) {
+	m.clamAV = checker
 }
 
 // HasHybridEncryption returns true if hybrid PQ encryption is available
@@ -389,45 +415,47 @@ func (m *Manager) getGCM() (cipher.AEAD, error) {
 
 // DeleteFile removes a file and its chunks
 func (m *Manager) DeleteFile(fileID string) error {
-    // Get chunks to delete from disk
-    rows, err := db.DB.Query("SELECT chunk_path FROM chunks WHERE file_id = ?", fileID)
-    if err != nil {
-        return err
-    }
-    defer rows.Close()
+	// Get chunks to delete from disk
+	rows, err := db.DB.Query("SELECT chunk_path FROM chunks WHERE file_id = ?", fileID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 
-    var paths []string
-    for rows.Next() {
-        var p string
-        if err := rows.Scan(&p); err == nil {
-            paths = append(paths, filepath.Join(m.cfg.UploadFolder, p))
-        }
-    }
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err == nil {
+			paths = append(paths, filepath.Join(m.cfg.UploadFolder, p))
+		}
+	}
 
-    // Delete details from DB
-    // Use transaction
-    tx, err := db.DB.Begin()
-    if err != nil { return err }
+	// Delete details from DB
+	// Use transaction
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
 
-    if _, err := tx.Exec("DELETE FROM chunks WHERE file_id = ?", fileID); err != nil {
-        tx.Rollback()
-        return err
-    }
-    if _, err := tx.Exec("DELETE FROM files WHERE id = ?", fileID); err != nil {
-        tx.Rollback()
-        return err
-    }
-    
-    if err := tx.Commit(); err != nil {
-        return err
-    }
+	if _, err := tx.Exec("DELETE FROM chunks WHERE file_id = ?", fileID); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM files WHERE id = ?", fileID); err != nil {
+		tx.Rollback()
+		return err
+	}
 
-    // Best effort delete from disk
-    for _, p := range paths {
-        os.Remove(p)
-    }
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 
-    return nil
+	// Best effort delete from disk
+	for _, p := range paths {
+		os.Remove(p)
+	}
+
+	return nil
 }
 
 // GetFileMetadata returns the file record from DB
@@ -811,6 +839,10 @@ func (m *Manager) GetStats() (*models.Stats, error) {
 				stats.TotalAPIUploads = value
 			case "total_bytes_stored":
 				stats.TotalStoredFormatted = formatBytes(value)
+			case "photodna_blocked":
+				stats.PhotoDNABlocked = value
+			case "clamav_blocked":
+				stats.ClamAVBlocked = value
 			}
 		}
 	}
@@ -833,6 +865,283 @@ func (m *Manager) IncrementStat(key string) error {
 func (m *Manager) IncrementStatByAmount(key string, amount int64) error {
 	_, err := db.DB.Exec("UPDATE stats SET stat_value = stat_value + ? WHERE stat_key = ?", amount, key)
 	return err
+}
+
+// GetStatValue returns the raw value of a stat key
+func (m *Manager) GetStatValue(key string) (int64, error) {
+	var value int64
+	err := db.DB.QueryRow("SELECT stat_value FROM stats WHERE stat_key = ?", key).Scan(&value)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+// GetTotalBytesStored returns the total bytes stored
+func (m *Manager) GetTotalBytesStored() int64 {
+	val, _ := m.GetStatValue("total_bytes_stored")
+	return val
+}
+
+// ========== Analytics Methods ==========
+
+// RecordStatsSnapshot records a snapshot of current stats for analytics
+func (m *Manager) RecordStatsSnapshot() error {
+	stats, err := m.GetStats()
+	if err != nil {
+		return err
+	}
+
+	totalBytes := m.GetTotalBytesStored()
+
+	_, err = db.DB.Exec(`
+		INSERT INTO stats_history (total_files, total_pastes, total_bytes, total_downloads)
+		VALUES (?, ?, ?, ?)
+	`, stats.TotalFiles, stats.TotalPastes, totalBytes, stats.TotalDownloads)
+	return err
+}
+
+// GetStatsHistory returns stats history for the specified number of days
+func (m *Manager) GetStatsHistory(days int) ([]models.StatsSnapshot, error) {
+	var snapshots []models.StatsSnapshot
+
+	rows, err := db.DB.Query(`
+		SELECT id, recorded_at, total_files, total_pastes, total_bytes, total_downloads
+		FROM stats_history
+		WHERE recorded_at >= datetime('now', ? || ' days')
+		ORDER BY recorded_at ASC
+	`, -days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s models.StatsSnapshot
+		if err := rows.Scan(&s.ID, &s.RecordedAt, &s.TotalFiles, &s.TotalPastes, &s.TotalBytes, &s.TotalDownloads); err != nil {
+			continue
+		}
+		snapshots = append(snapshots, s)
+	}
+	return snapshots, nil
+}
+
+// GetTopUploaders returns the top uploaders by file count
+func (m *Manager) GetTopUploaders(limit int) ([]models.UploaderStats, error) {
+	var uploaders []models.UploaderStats
+
+	rows, err := db.DB.Query(`
+		SELECT uploader_dest, COUNT(*) as file_count, COALESCE(SUM(size), 0) as total_bytes
+		FROM files
+		WHERE uploader_dest IS NOT NULL AND uploader_dest != '' AND is_blocked = 0
+		GROUP BY uploader_dest
+		ORDER BY file_count DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var u models.UploaderStats
+		if err := rows.Scan(&u.Destination, &u.FileCount, &u.TotalBytes); err != nil {
+			continue
+		}
+		uploaders = append(uploaders, u)
+	}
+	return uploaders, nil
+}
+
+// GetFileTypeDistribution returns distribution of files by MIME type
+func (m *Manager) GetFileTypeDistribution() ([]models.FileTypeStats, error) {
+	var stats []models.FileTypeStats
+
+	rows, err := db.DB.Query(`
+		SELECT
+			CASE
+				WHEN mime_type LIKE 'image/%' THEN 'Images'
+				WHEN mime_type LIKE 'video/%' THEN 'Videos'
+				WHEN mime_type LIKE 'audio/%' THEN 'Audio'
+				WHEN mime_type LIKE 'text/%' THEN 'Text'
+				WHEN mime_type LIKE 'application/pdf' THEN 'PDF'
+				WHEN mime_type LIKE 'application/%zip%' OR mime_type LIKE 'application/%tar%' OR mime_type LIKE 'application/%compress%' OR mime_type LIKE 'application/%archive%' THEN 'Archives'
+				ELSE 'Other'
+			END as category,
+			COUNT(*) as count,
+			COALESCE(SUM(size), 0) as bytes
+		FROM files
+		WHERE is_blocked = 0
+		GROUP BY category
+		ORDER BY count DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s models.FileTypeStats
+		if err := rows.Scan(&s.MimeType, &s.Count, &s.Bytes); err != nil {
+			continue
+		}
+		stats = append(stats, s)
+	}
+	return stats, nil
+}
+
+// CleanupOldStatsHistory removes stats history older than the specified days
+func (m *Manager) CleanupOldStatsHistory(days int) error {
+	_, err := db.DB.Exec(`
+		DELETE FROM stats_history
+		WHERE recorded_at < datetime('now', ? || ' days')
+	`, -days)
+	return err
+}
+
+// ========== Collection Methods ==========
+
+// CreateCollection creates a new collection
+func (m *Manager) CreateCollection(c *models.Collection) error {
+	_, err := db.DB.Exec(`
+		INSERT INTO collections (id, title, description, uploader_dest, delete_token, password_hash, expiry_time)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, c.ID, c.Title, c.Description, c.UploaderDest, c.DeleteToken, c.PasswordHash, c.ExpiryTime)
+	return err
+}
+
+// GetCollection returns a collection by ID
+func (m *Manager) GetCollection(id string) (*models.Collection, error) {
+	c := &models.Collection{}
+	err := db.DB.QueryRow(`
+		SELECT id, title, description, uploader_dest, delete_token, password_hash, expiry_time, created_at, view_count, is_blocked
+		FROM collections WHERE id = ?
+	`, id).Scan(&c.ID, &c.Title, &c.Description, &c.UploaderDest, &c.DeleteToken, &c.PasswordHash, &c.ExpiryTime, &c.CreatedAt, &c.ViewCount, &c.IsBlocked)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// AddFileToCollection adds a file to a collection
+func (m *Manager) AddFileToCollection(collectionID, fileID string, position int) error {
+	_, err := db.DB.Exec(`
+		INSERT INTO collection_files (collection_id, file_id, position)
+		VALUES (?, ?, ?)
+	`, collectionID, fileID, position)
+	return err
+}
+
+// AddFilesToCollection adds multiple files to a collection
+func (m *Manager) AddFilesToCollection(collectionID string, fileIDs []string) error {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+
+	for i, fileID := range fileIDs {
+		if _, err := tx.Exec(`
+			INSERT INTO collection_files (collection_id, file_id, position)
+			VALUES (?, ?, ?)
+		`, collectionID, fileID, i); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetCollectionFiles returns all files in a collection
+func (m *Manager) GetCollectionFiles(collectionID string) ([]*models.File, error) {
+	rows, err := db.DB.Query(`
+		SELECT f.id, f.filename, f.original_filename, f.size, f.mime_type, f.content_hash,
+		       f.upload_time, f.expiry_time, f.delete_token, f.is_encrypted, f.is_blocked,
+		       f.uploader_dest, f.download_count, f.password_hash, f.max_downloads,
+		       f.metadata_stripped, f.kem_ciphertext, f.key_version, f.encryption_version
+		FROM files f
+		INNER JOIN collection_files cf ON f.id = cf.file_id
+		WHERE cf.collection_id = ?
+		ORDER BY cf.position ASC
+	`, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var files []*models.File
+	for rows.Next() {
+		f := &models.File{}
+		if err := rows.Scan(&f.ID, &f.Filename, &f.OriginalFilename, &f.Size, &f.MimeType, &f.ContentHash,
+			&f.UploadTime, &f.ExpiryTime, &f.DeleteToken, &f.IsEncrypted, &f.IsBlocked,
+			&f.UploaderDest, &f.DownloadCount, &f.PasswordHash, &f.MaxDownloads,
+			&f.MetadataStripped, &f.KEMCiphertext, &f.KeyVersion, &f.EncryptionVersion); err != nil {
+			continue
+		}
+		files = append(files, f)
+	}
+	return files, nil
+}
+
+// GetCollectionFileCount returns the number of files in a collection
+func (m *Manager) GetCollectionFileCount(collectionID string) (int, error) {
+	var count int
+	err := db.DB.QueryRow("SELECT COUNT(*) FROM collection_files WHERE collection_id = ?", collectionID).Scan(&count)
+	return count, err
+}
+
+// DeleteCollection deletes a collection (files remain)
+func (m *Manager) DeleteCollection(id string) error {
+	_, err := db.DB.Exec("DELETE FROM collections WHERE id = ?", id)
+	return err
+}
+
+// IncrementCollectionViews increments the view count for a collection
+func (m *Manager) IncrementCollectionViews(id string) error {
+	_, err := db.DB.Exec("UPDATE collections SET view_count = view_count + 1 WHERE id = ?", id)
+	return err
+}
+
+// BlockCollection blocks a collection
+func (m *Manager) BlockCollection(id string) error {
+	_, err := db.DB.Exec("UPDATE collections SET is_blocked = 1 WHERE id = ?", id)
+	return err
+}
+
+// CleanupExpiredCollections removes expired collections
+func (m *Manager) CleanupExpiredCollections() (int64, error) {
+	result, err := db.DB.Exec(`
+		DELETE FROM collections
+		WHERE expiry_time IS NOT NULL AND expiry_time < datetime('now')
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// ListCollections returns all collections (for admin)
+func (m *Manager) ListCollections(limit int) ([]*models.Collection, error) {
+	rows, err := db.DB.Query(`
+		SELECT id, title, description, uploader_dest, delete_token, password_hash, expiry_time, created_at, view_count, is_blocked
+		FROM collections
+		ORDER BY created_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var collections []*models.Collection
+	for rows.Next() {
+		c := &models.Collection{}
+		if err := rows.Scan(&c.ID, &c.Title, &c.Description, &c.UploaderDest, &c.DeleteToken, &c.PasswordHash, &c.ExpiryTime, &c.CreatedAt, &c.ViewCount, &c.IsBlocked); err != nil {
+			continue
+		}
+		collections = append(collections, c)
+	}
+	return collections, nil
 }
 
 // formatBytes converts bytes to human-readable format
@@ -867,6 +1176,46 @@ func (m *Manager) IncrementFileDownloads(fileID string) error {
 	}
 
 	return tx.Commit()
+}
+
+// IncrementAndCheckDownloadLimit increments download count and checks against max downloads atomically
+// Returns:
+// - allowed: true if download is allowed (limit not reached)
+// - currentCount: the new download count
+// - err: any database error
+func (m *Manager) IncrementAndCheckDownloadLimit(fileID string) (allowed bool, currentCount int, err error) {
+	// Use atomic UPDATE ... RETURNING (SQLite 3.35+)
+	// to avoid transaction locking issues (SQLITE_BUSY)
+	var newCount int
+	var maxDownloads *int
+
+	query := `UPDATE files SET download_count = download_count + 1 WHERE id = ? RETURNING download_count, max_downloads`
+	err = db.DB.QueryRow(query, fileID).Scan(&newCount, &maxDownloads)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Update stats (best effort)
+	m.IncrementStat("total_downloads")
+
+	// Check limit
+	if maxDownloads != nil {
+		// download_count starts at -1. First download sets it to 0.
+		// So actual downloads = newCount + 1.
+		// Example: Max=1.
+		// Req 1: -1 -> 0. Actual=1. 1 >= 1 (TRUE).
+		// Wait, if 1>=1, we block?
+		// If max=1, we want 1 download.
+		// If actual=1, that IS the 1 allowed download. We should ALLOW it.
+		// So block only if actual > max.
+
+		actualDownloads := newCount + 1
+		if actualDownloads > *maxDownloads {
+			return false, newCount, nil
+		}
+	}
+
+	return true, newCount, nil
 }
 
 // CleanupExpiredPastes removes expired pastes
@@ -1080,16 +1429,15 @@ func (m *Manager) CompleteChunkedUpload(uploadID string) (*models.File, string, 
 		return nil, "", err
 	}
 
-	// Begin transaction
-	tx, err := db.DB.Begin()
-	if err != nil {
-		return nil, "", err
-	}
-	defer tx.Rollback()
+	// Check if this file needs scanning
+	needsPhotoDNA := m.photoDNA != nil && m.photoDNA.ShouldCheck(upload.MimeType)
+	needsClamAV := m.clamAV != nil && m.clamAV.ShouldCheck(upload.MimeType)
+	needsBuffering := needsPhotoDNA || needsClamAV
 
-	var totalSize int64 = 0
+	// First pass: Decrypt all chunks and optionally buffer for scanning
+	var fileBuffer bytes.Buffer
+	var decryptedChunks [][]byte
 
-	// Process each chunk: decrypt, hash content, re-encrypt as file chunks
 	for i, uc := range chunks {
 		// Read encrypted chunk (these are always legacy encrypted during upload)
 		chunkPath := filepath.Join(m.cfg.UploadFolder, uc.ChunkPath)
@@ -1108,6 +1456,72 @@ func (m *Manager) CompleteChunkedUpload(uploadID string) (*models.File, string, 
 			return nil, "", fmt.Errorf("failed to decrypt chunk %d: %w", i, err)
 		}
 
+		decryptedChunks = append(decryptedChunks, plaintext)
+		if needsBuffering {
+			fileBuffer.Write(plaintext)
+		}
+	}
+
+	// PhotoDNA check for images (before re-encryption/storage)
+	if needsPhotoDNA {
+		blocked, err := m.photoDNA.CheckImage(context.Background(), fileBuffer.Bytes())
+		if blocked {
+			m.IncrementStat("photodna_blocked")
+			// Clean up upload chunks
+			for _, uc := range chunks {
+				os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
+			}
+			db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
+			db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
+			return nil, "", fmt.Errorf("content blocked")
+		}
+		if err != nil {
+			// Error handling depends on fail-open setting (handled in CheckImage)
+			// If we get here with an error, it means fail-closed rejected it
+			for _, uc := range chunks {
+				os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
+			}
+			db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
+			db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
+			return nil, "", fmt.Errorf("content check failed: %w", err)
+		}
+	}
+
+	// ClamAV check for non-image files (before re-encryption/storage)
+	if needsClamAV {
+		infected, threat, err := m.clamAV.CheckFile(context.Background(), fileBuffer.Bytes())
+		if infected {
+			m.IncrementStat("clamav_blocked")
+			// Clean up upload chunks
+			for _, uc := range chunks {
+				os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
+			}
+			db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
+			db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
+			return nil, "", fmt.Errorf("malware detected: %s", threat)
+		}
+		if err != nil {
+			// Error handling depends on fail-open setting (handled in CheckFile)
+			for _, uc := range chunks {
+				os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
+			}
+			db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
+			db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
+			return nil, "", fmt.Errorf("virus scan failed: %w", err)
+		}
+	}
+
+	// Begin transaction
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback()
+
+	var totalSize int64 = 0
+
+	// Second pass: Hash content and re-encrypt as file chunks
+	for _, plaintext := range decryptedChunks {
 		// Update content hash
 		contentHasher.Write(plaintext)
 

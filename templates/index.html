@@ -48,7 +48,7 @@
 
             <header class="header-section">
                 <a href="/" style="display: inline-block; margin-bottom: 1.5rem;">
-                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 69px;">
+                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 79px;">
                 </a>
                 <h1>I2P Secure Share</h1>
                 <p style="color: var(--text-muted);">Anonymous, Encrypted, Persistent.</p>
@@ -80,7 +80,7 @@
                         <label for="tab-tos">Terms</label>
 
                         <!-- These define the structure where siblings are toggled -->
-                        <div class="content-panels" style="width: 100%;">
+                        <div class="content-panels" style="width: 100%; margin-top: 1.5rem;">
 
                             <!-- File Upload Panel -->
                             <div id="panel-file" class="tab-content">
@@ -158,6 +158,70 @@
 
                                     <button type="submit" class="btn btn-primary w-full">Encrypted Upload</button>
                                 </form>
+
+                                <!-- Multi-file Collection Upload (Advanced Mode Only) -->
+                                <div id="collection-upload-section" class="hidden" style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
+                                    <h3 style="margin-bottom: 1rem; color: var(--primary);">Create Collection</h3>
+                                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+                                        Upload multiple files and group them into a shareable collection.
+                                    </p>
+
+                                    <div class="mb-6">
+                                        <input type="file" id="multi-file-input" multiple>
+                                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                            Select multiple files (max 50). Total size limit: 500MB.
+                                        </p>
+                                    </div>
+
+                                    <div id="multi-file-list" class="hidden mb-6" style="background: var(--bg-input); border-radius: var(--radius-sm); padding: 1rem; max-height: 200px; overflow-y: auto;">
+                                    </div>
+
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                                        <div>
+                                            <label for="collection-title">Collection Title</label>
+                                            <input type="text" id="collection-title" placeholder="My Collection" required>
+                                        </div>
+                                        <div>
+                                            <label for="collection-expiry">Expires In</label>
+                                            <select id="collection-expiry">
+                                                <option value="24h" selected>24 Hours</option>
+                                                <option value="168h">7 Days</option>
+                                                <option value="720h">30 Days</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-6">
+                                        <label for="collection-description">Description (Optional)</label>
+                                        <input type="text" id="collection-description" placeholder="Optional description...">
+                                    </div>
+
+                                    <div class="mb-6">
+                                        <label
+                                            style="display: flex; align-items: center; cursor: pointer; font-weight: normal;">
+                                            <input type="checkbox" id="collection-password-toggle"
+                                                style="width: auto; margin-right: 0.5rem;"
+                                                onchange="document.getElementById('collection-password-field').style.display = this.checked ? 'block' : 'none'">
+                                            Password Protect Collection
+                                        </label>
+                                        <div id="collection-password-field" style="display: none; margin-top: 0.5rem;">
+                                            <input type="password" id="collection-password" placeholder="Collection password">
+                                        </div>
+                                    </div>
+
+                                    <div id="collection-progress-container" class="hidden mb-6">
+                                        <div style="background: var(--bg-input); border-radius: var(--radius-sm); height: 20px; overflow: hidden;">
+                                            <div id="collection-progress-bar" style="background: var(--secondary); width: 0%; height: 100%; transition: width 0.2s;"></div>
+                                        </div>
+                                        <div id="collection-status" style="text-align: center; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                            Ready to upload
+                                        </div>
+                                    </div>
+
+                                    <button type="button" id="create-collection-btn" class="btn btn-primary w-full" onclick="createCollection()">
+                                        Upload & Create Collection
+                                    </button>
+                                </div>
                             </div>
 
                             <!-- Pastebin Panel -->
@@ -203,9 +267,6 @@
 
                             <!-- API Panel -->
                             <div id="panel-api" class="tab-content">
-                                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Programmatic access to
-                                    Drop.i2p. No API key required. All endpoints are rate-limited.</p>
-
                                 <!-- File Upload API -->
                                 <div class="feature-item mb-4">
                                     <h3 style="font-size: 1.1rem; margin-bottom: 0.75rem; color: var(--primary);">POST /api/upload</h3>
@@ -222,21 +283,31 @@
                                         </ul>
                                     </div>
 
-                                    <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem;"><code># Basic upload
-curl -X POST -F "file=@/path/to/image.jpg" \
-  http://{{.Host}}/api/upload
-
-# With options
-curl -X POST \
-  -F "file=@/path/to/secret.pdf" \
-  -F "expiry=1h" \
-  -F "password=mysecret" \
-  -F "max_downloads=5" \
-  http://{{.Host}}/api/upload</code></pre>
+                                    <strong style="color: var(--text-main); font-size: 0.85rem;">Example:</strong>
+                                    <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem; margin-top: 0.5rem;"><code>$ curl -X POST -F "file=@linuxiso.torrent" -F "expiry=168h" http://{{.Host}}/api/upload</code></pre>
 
                                     <div style="margin-top: 0.75rem;">
                                         <strong style="color: var(--text-main); font-size: 0.85rem;">Response:</strong>
-                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{"id":"abc123","url":"/f/abc123","delete_token":"xyz789"}</code></pre>
+                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{
+  "id": "k7x9m2",
+  "url": "/f/k7x9m2",
+  "delete_token": "a4f8c1e9b2d6"
+}</code></pre>
+                                    </div>
+
+                                    <div style="margin-top: 0.75rem;">
+                                        <strong style="color: var(--text-main); font-size: 0.85rem;">With password protection:</strong>
+                                        <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem; margin-top: 0.5rem;"><code>$ curl -X POST \
+  -F "file=@linuxiso.torrent" \
+  -F "expiry=168h" \
+  -F "password=secretpass" \
+  -F "max_downloads=10" \
+  http://{{.Host}}/api/upload</code></pre>
+                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{
+  "id": "p3n8v5",
+  "url": "/f/p3n8v5",
+  "delete_token": "x7k2m9q4w1"
+}</code></pre>
                                     </div>
                                 </div>
 
@@ -254,15 +325,19 @@ curl -X POST \
                                         </ul>
                                     </div>
 
-                                    <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem;"><code># Create a paste
-curl -X POST \
+                                    <strong style="color: var(--text-main); font-size: 0.85rem;">Example:</strong>
+                                    <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem; margin-top: 0.5rem;"><code>$ curl -X POST \
   -H "Content-Type: application/json" \
-  -d '{"content": "print(\"Hello World\")", "language": "python", "expiry": "24h"}' \
+  -d '{"content": "#!/bin/bash\necho Hello from I2P", "language": "bash", "expiry": "24h"}' \
   http://{{.Host}}/api/upload/paste</code></pre>
 
                                     <div style="margin-top: 0.75rem;">
                                         <strong style="color: var(--text-main); font-size: 0.85rem;">Response:</strong>
-                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{"id":"def456","url":"/p/def456","delete_token":"uvw123"}</code></pre>
+                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{
+  "id": "r2t6y8",
+  "url": "/p/r2t6y8",
+  "delete_token": "h5j3k7l9m1"
+}</code></pre>
                                     </div>
                                 </div>
                             </div>
@@ -313,7 +388,7 @@ curl -X POST \
 
                                     <h3 style="color: var(--text-main); margin-top: 1.5rem; font-size: 1.2rem;">3.
                                         Liability</h3>
-                                    <p>This free service comes with no warranties. We are not responsible for data loss.</p>
+                                    <p style="margin-bottom: 1.5rem;">This free service comes with no warranties. We are not responsible for data loss.</p>
                                 </div>
                             </div>
                         </div>
@@ -359,8 +434,12 @@ curl -X POST \
         function toggleProgressBarMode(enabled) {
             useProgressBar = enabled;
             const container = document.getElementById('upload-progress-container');
-            if (!enabled) {
+            const collectionSection = document.getElementById('collection-upload-section');
+            if (enabled) {
+                collectionSection.classList.remove('hidden');
+            } else {
                 container.classList.add('hidden');
+                collectionSection.classList.add('hidden');
                 document.getElementById('upload-progress-bar').style.width = '0%';
             }
         }
@@ -439,6 +518,138 @@ curl -X POST \
                     progressBar.style.width = '0%';
                 }
             });
+        }
+
+        // Collection Upload Logic
+        const multiFileInput = document.getElementById('multi-file-input');
+        const multiFileList = document.getElementById('multi-file-list');
+
+        if (multiFileInput) {
+            multiFileInput.addEventListener('change', () => {
+                const files = multiFileInput.files;
+                if (files.length > 0) {
+                    multiFileList.classList.remove('hidden');
+                    multiFileList.innerHTML = '';
+                    let totalSize = 0;
+                    for (let i = 0; i < files.length; i++) {
+                        totalSize += files[i].size;
+                        const div = document.createElement('div');
+                        div.style.cssText = 'display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid var(--border-color);';
+                        div.innerHTML = `<span style="color: var(--text-main);">${files[i].name}</span><span style="color: var(--text-muted);">${formatFileSize(files[i].size)}</span>`;
+                        multiFileList.appendChild(div);
+                    }
+                    const summary = document.createElement('div');
+                    summary.style.cssText = 'margin-top: 0.5rem; padding-top: 0.5rem; color: var(--primary); font-weight: 600;';
+                    summary.textContent = `${files.length} files selected (${formatFileSize(totalSize)} total)`;
+                    multiFileList.appendChild(summary);
+                } else {
+                    multiFileList.classList.add('hidden');
+                }
+            });
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        async function createCollection() {
+            const files = multiFileInput.files;
+            const title = document.getElementById('collection-title').value.trim();
+            const description = document.getElementById('collection-description').value.trim();
+            const expiry = document.getElementById('collection-expiry').value;
+            const passwordEnabled = document.getElementById('collection-password-toggle').checked;
+            const password = passwordEnabled ? document.getElementById('collection-password').value : '';
+
+            if (!title) {
+                alert('Please enter a collection title');
+                return;
+            }
+            if (files.length === 0) {
+                alert('Please select files to upload');
+                return;
+            }
+            if (files.length > 50) {
+                alert('Maximum 50 files per collection');
+                return;
+            }
+
+            const btn = document.getElementById('create-collection-btn');
+            const progressContainer = document.getElementById('collection-progress-container');
+            const progressBar = document.getElementById('collection-progress-bar');
+            const statusText = document.getElementById('collection-status');
+
+            btn.disabled = true;
+            progressContainer.classList.remove('hidden');
+
+            const uploadedFileIds = [];
+
+            try {
+                // Upload each file
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const percent = Math.round(((i) / files.length) * 100);
+                    progressBar.style.width = percent + '%';
+                    statusText.textContent = `Uploading ${i + 1}/${files.length}: ${file.name}`;
+
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('expiry', expiry);
+
+                    const response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to upload ${file.name}`);
+                    }
+
+                    const result = await response.json();
+                    if (!result.id) {
+                        throw new Error(`Invalid response for ${file.name}`);
+                    }
+                    uploadedFileIds.push(result.id);
+                }
+
+                // Create collection
+                statusText.textContent = 'Creating collection...';
+                progressBar.style.width = '90%';
+
+                const collectionResponse = await fetch('/api/collection/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title,
+                        description: description,
+                        file_ids: uploadedFileIds,
+                        password: password,
+                        expiry: expiry
+                    })
+                });
+
+                if (!collectionResponse.ok) {
+                    throw new Error('Failed to create collection');
+                }
+
+                const collection = await collectionResponse.json();
+                progressBar.style.width = '100%';
+                statusText.textContent = 'Collection created!';
+
+                // Redirect to collection page
+                setTimeout(() => {
+                    window.location.href = collection.url + '?token=' + collection.delete_token + '&flash=Collection+created+successfully&flash_type=success';
+                }, 500);
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                btn.disabled = false;
+                progressContainer.classList.add('hidden');
+                progressBar.style.width = '0%';
+            }
         }
     </script>
 </body>

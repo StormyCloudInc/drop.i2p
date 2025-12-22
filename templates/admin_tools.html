@@ -37,10 +37,11 @@
                 {{end}}
 
                 <div class="admin-nav">
-                    <a href="/admin">Files</a>
-                    <a href="/admin/reports">Reports</a>
-                    <a href="/admin/bans">Bans</a>
-                    <a href="/admin/tools" class="active">Tools</a>
+                    <a href="{{.AdminURL}}">Files</a>
+                    <a href="{{.AdminURL}}/reports">Reports</a>
+                    <a href="{{.AdminURL}}/bans">Bans</a>
+                    <a href="{{.AdminURL}}/tools" class="active">Tools</a>
+                    <a href="{{.AdminURL}}/analytics">Analytics</a>
                 </div>
 
                 <div style="display: grid; gap: 1.5rem;">
@@ -52,7 +53,7 @@
                             Manually trigger cleanup of expired files, pastes, and incomplete uploads.
                             This normally runs automatically every 15 minutes.
                         </p>
-                        <form action="/admin/tools/cleanup" method="POST">
+                        <form action="{{.AdminURL}}/tools/cleanup" method="POST">
                             <button type="submit" class="btn btn-primary">Run Cleanup Now</button>
                         </form>
                     </div>

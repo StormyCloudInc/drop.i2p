@@ -94,6 +94,8 @@ type Stats struct {
 	TotalDownloads       int64  `json:"total_downloads"`
 	TotalAPIUploads      int64  `json:"total_api_uploads"`
 	TotalStoredFormatted string `json:"total_stored_formatted"`
+	PhotoDNABlocked      int64  `json:"photodna_blocked"`
+	ClamAVBlocked        int64  `json:"clamav_blocked"`
 }
 
 // ChunkedUpload represents an in-progress chunked upload session
@@ -136,3 +138,49 @@ const (
 	BanTypeDestination = "destination"
 	BanTypeFileHash    = "file_hash"
 )
+
+// StatsSnapshot represents a point-in-time snapshot of stats for analytics
+type StatsSnapshot struct {
+	ID             int64     `db:"id" json:"id"`
+	RecordedAt     time.Time `db:"recorded_at" json:"recorded_at"`
+	TotalFiles     int64     `db:"total_files" json:"total_files"`
+	TotalPastes    int64     `db:"total_pastes" json:"total_pastes"`
+	TotalBytes     int64     `db:"total_bytes" json:"total_bytes"`
+	TotalDownloads int64     `db:"total_downloads" json:"total_downloads"`
+}
+
+// UploaderStats represents statistics for a single uploader
+type UploaderStats struct {
+	Destination string `json:"destination"`
+	FileCount   int    `json:"file_count"`
+	TotalBytes  int64  `json:"total_bytes"`
+}
+
+// FileTypeStats represents file type distribution
+type FileTypeStats struct {
+	MimeType string `json:"mime_type"`
+	Count    int64  `json:"count"`
+	Bytes    int64  `json:"bytes"`
+}
+
+// Collection represents a group of files shared under one link
+type Collection struct {
+	ID           string     `db:"id" json:"id"`
+	Title        string     `db:"title" json:"title"`
+	Description  string     `db:"description" json:"description"`
+	UploaderDest string     `db:"uploader_dest" json:"-"`
+	DeleteToken  string     `db:"delete_token" json:"-"`
+	PasswordHash string     `db:"password_hash" json:"-"`
+	ExpiryTime   *time.Time `db:"expiry_time" json:"expiry_time"`
+	CreatedAt    time.Time  `db:"created_at" json:"created_at"`
+	ViewCount    int        `db:"view_count" json:"view_count"`
+	IsBlocked    bool       `db:"is_blocked" json:"is_blocked"`
+}
+
+// CollectionFile represents a file within a collection
+type CollectionFile struct {
+	CollectionID string    `db:"collection_id"`
+	FileID       string    `db:"file_id"`
+	Position     int       `db:"position"`
+	AddedAt      time.Time `db:"added_at"`
+}

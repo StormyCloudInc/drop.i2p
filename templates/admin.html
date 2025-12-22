@@ -59,15 +59,24 @@
                         <div class="stat-value" style="{{if .Reports}}color: var(--warning);{{end}}">{{if
                             .Reports}}{{len .Reports}}{{else}}0{{end}}</div>
                     </div>
+                    <div class="stat-card">
+                        <div class="stat-label">PhotoDNA Blocked</div>
+                        <div class="stat-value" style="{{if .Stats.PhotoDNABlocked}}color: var(--error);{{end}}">{{.Stats.PhotoDNABlocked}}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">ClamAV Blocked</div>
+                        <div class="stat-value" style="{{if .Stats.ClamAVBlocked}}color: var(--error);{{end}}">{{.Stats.ClamAVBlocked}}</div>
+                    </div>
                 </div>
                 {{end}}
 
                 <div class="admin-nav">
-                    <a href="/admin" class="active">Files</a>
-                    <a href="/admin/reports">Reports {{if .Reports}}<span class="tag tag-yellow"
+                    <a href="{{.AdminURL}}" class="active">Files</a>
+                    <a href="{{.AdminURL}}/reports">Reports {{if .Reports}}<span class="tag tag-yellow"
                             style="margin-left:5px;">{{len .Reports}}</span>{{end}}</a>
-                    <a href="/admin/bans">Bans</a>
-                    <a href="/admin/tools">Tools</a>
+                    <a href="{{.AdminURL}}/bans">Bans</a>
+                    <a href="{{.AdminURL}}/tools">Tools</a>
+                    <a href="{{.AdminURL}}/analytics">Analytics</a>
                 </div>
 
                 <div class="glass-panel" style="padding: 0;">
@@ -126,12 +135,12 @@
                                     </td>
                                     <td>
                                         {{if not .IsBlocked}}
-                                        <form action="/admin/block/{{.ID}}" method="POST" class="action-form"
+                                        <form action="{{$.AdminURL}}/block/{{.ID}}" method="POST" class="action-form"
                                             onsubmit="return confirm('Block this file?');">
                                             <button class="action-btn" style="color: var(--warning);">Block</button>
                                         </form>
                                         {{end}}
-                                        <form action="/admin/delete/{{.ID}}" method="POST" class="action-form"
+                                        <form action="{{$.AdminURL}}/delete/{{.ID}}" method="POST" class="action-form"
                                             onsubmit="return confirm('Delete this file permanently?');">
                                             <button class="action-btn" style="color: var(--error);">Delete</button>
                                         </form>

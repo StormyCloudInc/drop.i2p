@@ -14,6 +14,10 @@ var BlockedExtensions = map[string]bool{
 	// Script files
 	".vbs": true, ".vbe": true, ".js": true, ".jse": true,
 	".ws": true, ".wsf": true, ".wsc": true, ".wsh": true,
+	".php": true, ".phtml": true, ".php3": true, ".php4": true, ".php5": true,
+	".phar": true, ".jsp": true, ".jspx": true, ".aspx": true, ".asp": true,
+	".ashx": true, ".py": true, ".pl": true, ".rb": true, ".cgi": true,
+	".sh": true, ".bash": true, ".zsh": true, ".fish": true, ".ksh": true,
 
 	// PowerShell
 	".ps1": true, ".ps2": true, ".psc1": true, ".psc2": true,
@@ -22,18 +26,19 @@ var BlockedExtensions = map[string]bool{
 	// Other dangerous types
 	".msc": true, ".msp": true, ".reg": true, ".inf": true,
 	".scf": true, ".lnk": true, ".hta": true, ".cpl": true,
+	".jar": true, ".war": true, ".ear": true,
 }
 
 // DangerousMimeTypes contains MIME types that indicate potentially harmful content
 var DangerousMimeTypes = map[string]bool{
-	"application/x-executable":     true,
-	"application/x-dosexec":        true,
-	"application/x-msdownload":     true,
-	"application/x-msdos-program":  true,
-	"application/x-ms-installer":   true,
-	"application/x-shellscript":    true,
-	"application/x-batch":          true,
-	"application/x-msi":            true,
+	"application/x-executable":    true,
+	"application/x-dosexec":       true,
+	"application/x-msdownload":    true,
+	"application/x-msdos-program": true,
+	"application/x-ms-installer":  true,
+	"application/x-shellscript":   true,
+	"application/x-batch":         true,
+	"application/x-msi":           true,
 }
 
 // IsAllowedExtension checks if a filename has an allowed extension
@@ -86,4 +91,30 @@ func RemoveBlockedExtension(ext string) {
 		ext = "." + ext
 	}
 	delete(BlockedExtensions, ext)
+}
+
+// SanitizeFilename cleans a filename to prevent path traversal and other issues
+func SanitizeFilename(filename string) string {
+	// 1. Get basename to prevent directory traversal
+	filename = filepath.Base(filename)
+
+	// 2. Remove any non-printable or dangerous characters
+	// Allow alphanumeric, dot, dash, underscore, space, brackets
+	clean := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '.' || r == '-' || r == '_' || r == ' ' ||
+			r == '(' || r == ')' || r == '[' || r == ']' {
+			return r
+		}
+		return '_' // Replace invalid chars with underscore
+	}, filename)
+
+	// 3. Prevent empty filename
+	if clean == "" || clean == "." || clean == ".." {
+		return "unnamed_file"
+	}
+
+	return clean
 }

@@ -1,14 +1,34 @@
 # Data and uploads
 uploads/
 database.db
+database.db-*
 *.db
 .env
 
 # Build artifacts
 drop
+drop.exe
 drop-linux-amd64
 genkeys
 hashpw
+*.exe
+*.tar
+deploy.tar
+
+# Logs
+*.log
+debug.log
+
+# Test files
+stress_test.db
+reproduce_*.go
+verify_*.go
+
+# IDE/Editor
+.claude/
+.vscode/
+.idea/
 
 # OS files
 .DS_Store
+Thumbs.db

@@ -37,10 +37,11 @@
                 {{end}}
 
                 <div class="admin-nav">
-                    <a href="/admin">Files</a>
-                    <a href="/admin/reports" class="active">Reports</a>
-                    <a href="/admin/bans">Bans</a>
-                    <a href="/admin/tools">Tools</a>
+                    <a href="{{.AdminURL}}">Files</a>
+                    <a href="{{.AdminURL}}/reports" class="active">Reports</a>
+                    <a href="{{.AdminURL}}/bans">Bans</a>
+                    <a href="{{.AdminURL}}/tools">Tools</a>
+                    <a href="{{.AdminURL}}/analytics">Analytics</a>
                 </div>
 
                 <div class="glass-panel" style="padding: 0;">
@@ -73,22 +74,22 @@
                                     <td>{{.CreatedAt.Format "Jan 02 15:04"}}</td>
                                     <td>
                                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                            <form action="{{$.AdminURL}}/reports/{{.ID}}/action" method="POST"
                                                 class="action-form">
                                                 <input type="hidden" name="action" value="dismiss">
                                                 <button class="tag tag-blue">Dismiss</button>
                                             </form>
-                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                            <form action="{{$.AdminURL}}/reports/{{.ID}}/action" method="POST"
                                                 class="action-form" onsubmit="return confirm('Delete this file?');">
                                                 <input type="hidden" name="action" value="delete_file">
                                                 <button class="tag tag-red">Delete File</button>
                                             </form>
-                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                            <form action="{{$.AdminURL}}/reports/{{.ID}}/action" method="POST"
                                                 class="action-form" onsubmit="return confirm('Ban hash?');">
                                                 <input type="hidden" name="action" value="ban_hash">
                                                 <button class="tag tag-orange">Ban Hash</button>
                                             </form>
-                                            <form action="/admin/reports/{{.ID}}/action" method="POST"
+                                            <form action="{{$.AdminURL}}/reports/{{.ID}}/action" method="POST"
                                                 class="action-form" onsubmit="return confirm('Ban uploader?');">
                                                 <input type="hidden" name="action" value="ban_uploader">
                                                 <button class="tag tag-red">Ban Uploader</button>

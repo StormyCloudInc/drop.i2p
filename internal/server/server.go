@@ -2,12 +2,16 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
+	"drop-i2p/internal/clamav"
 	"drop-i2p/internal/config"
 	"drop-i2p/internal/i2p"
 	"drop-i2p/internal/metadata"
 	mw "drop-i2p/internal/middleware"
+	"drop-i2p/internal/photodna"
 	"drop-i2p/internal/storage"
+	"drop-i2p/internal/webhook"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -19,6 +23,9 @@ type Server struct {
 	transport   i2p.Transport
 	rateLimiter *mw.RateLimiter
 	stripper    *metadata.Stripper
+	photoDNA    *photodna.Scanner
+	clamAV      *clamav.Scanner
+	webhook     *webhook.Notifier
 }
 
 func New(cfg *config.Config, store *storage.Manager) *Server {
@@ -31,13 +38,30 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 	// Initialize metadata stripper
 	stripper := metadata.NewStripper()
 
+	// Initialize PhotoDNA scanner
+	photoDNAScanner := photodna.NewScanner(cfg)
+
+	// Initialize ClamAV scanner
+	clamAVScanner := clamav.NewScanner(cfg)
+
+	// Initialize webhook notifier
+	webhookNotifier := webhook.NewNotifier(cfg)
+
 	return &Server{
 		cfg:         cfg,
 		store:       store,
 		transport:   transport,
 		rateLimiter: rateLimiter,
 		stripper:    stripper,
+		photoDNA:    photoDNAScanner,
+		clamAV:      clamAVScanner,
+		webhook:     webhookNotifier,
 	}
+}
+
+// Webhook returns the webhook notifier for use by background tasks
+func (s *Server) Webhook() *webhook.Notifier {
+	return s.webhook
 }
 
 func (s *Server) Router() http.Handler {
@@ -47,6 +71,23 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 
+	// Gzip compression for responses (significant bandwidth savings on I2P)
+	// Note: chi requires exact content-type match, so include charset variants
+	r.Use(middleware.Compress(5,
+		"text/html",
+		"text/html; charset=utf-8",
+		"text/css",
+		"text/css; charset=utf-8",
+		"text/plain",
+		"text/plain; charset=utf-8",
+		"text/javascript",
+		"application/javascript",
+		"application/json",
+		"application/json; charset=utf-8",
+		"application/xml",
+		"image/svg+xml",
+	))
+
 	// I2P middleware to extract destination from headers
 	r.Use(i2p.I2PMiddleware)
 
@@ -54,9 +95,23 @@ func (s *Server) Router() http.Handler {
 	r.Use(mw.RateLimitMiddleware(s.rateLimiter))
 
 	// Static Files
+	// Static Files
 	fs := http.FileServer(http.Dir("static"))
-	r.Handle("/static/*", http.StripPrefix("/static/", fs))
-
+	r.Get("/static/*", func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.RouteContext(r.Context())
+		opts := rctx.URLParams
+		pathPrefix := "/static/"
+		if len(opts.Keys) > 0 { // Should not happen with * wildcard but to be safe
+			// ..
+		}
+		// Clean the path to avoid traversal/confusion
+		path := r.URL.Path
+		if strings.HasSuffix(path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		http.StripPrefix(pathPrefix, fs).ServeHTTP(w, r)
+	})
 	r.Get("/", s.handleIndex)
 	r.Post("/upload", s.handleUpload)
 	r.Get("/view/{fileID}", s.handleViewFile)
@@ -71,6 +126,11 @@ func (s *Server) Router() http.Handler {
 	r.Get("/p/{pasteID}/raw", s.handleRawPaste)
 	r.Get("/pd/{pasteID}/{token}", s.handleDeletePaste)
 
+	// Collection routes
+	r.Get("/c/{collectionID}", s.handleViewCollection)
+	r.Post("/c/{collectionID}/unlock", s.handleUnlockCollection)
+	r.Get("/cd/{collectionID}/{token}", s.handleDeleteCollection)
+
 	// Static pages
 	r.Get("/donate", s.handleDonate)
 	r.Get("/report", s.handleReportPage)
@@ -82,6 +142,9 @@ func (s *Server) Router() http.Handler {
 		r.Post("/upload/paste", s.handleAPIPaste)
 		r.Post("/report", s.handleReport)
 
+		// Collection API routes
+		r.Post("/collection/create", s.handleAPICreateCollection)
+
 		// Chunked upload routes
 		r.Post("/upload/chunked/init", s.handleChunkedInit)
 		r.Post("/upload/chunked/{uploadID}/{chunkIndex}", s.handleChunkedUpload)
@@ -89,12 +152,11 @@ func (s *Server) Router() http.Handler {
 		r.Get("/upload/chunked/{uploadID}/status", s.handleChunkedStatus)
 	})
 
-
 	// Custom 404 handler
 	r.NotFound(handleNotFound)
 
-	// Admin routes
-	r.Route("/admin", func(r chi.Router) {
+	// Admin routes (configurable via SSP_ADMIN_URL, default: /admin)
+	r.Route(s.cfg.AdminURL, func(r chi.Router) {
 		r.Use(s.adminAuth)
 		r.Get("/", s.handleAdminDashboard)
 		r.Post("/delete/{fileID}", s.handleAdminDelete)
@@ -106,6 +168,7 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/bans/{banID}", s.handleAdminDeleteBan)
 		r.Get("/tools", s.handleAdminTools)
 		r.Post("/tools/cleanup", s.handleAdminCleanup)
+		r.Get("/analytics", s.handleAdminAnalytics)
 	})
 
 	return r

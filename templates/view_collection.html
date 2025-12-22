@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Collection.Title}} - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container">
+
+            <header class="header-section">
+                <a href="/" style="display: inline-block; margin-bottom: 1.5rem;">
+                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 79px;">
+                </a>
+                <h1>{{.Collection.Title}}</h1>
+                {{if .Collection.Description}}
+                <p style="color: var(--text-muted); margin-top: 0.5rem;">{{.Collection.Description}}</p>
+                {{end}}
+            </header>
+
+            <main>
+                {{if .Flash}}
+                <div class="alert alert-{{.FlashType}}">
+                    {{.Flash}}
+                </div>
+                {{end}}
+
+                {{if .NeedsPassword}}
+                <!-- Password Protection Form -->
+                <div class="glass-panel" style="padding: 2rem; max-width: 400px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 1.5rem; text-align: center;">Password Protected</h2>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem; text-align: center;">
+                        This collection is password protected. Enter the password to view.
+                    </p>
+                    <form action="/c/{{.Collection.ID}}/unlock" method="POST">
+                        <div class="mb-6">
+                            <input type="password" name="password" placeholder="Enter password" required autofocus>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-full">Unlock Collection</button>
+                    </form>
+                </div>
+
+                {{else}}
+
+                <!-- Collection Info -->
+                <div class="glass-panel" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <span style="color: var(--text-muted);">{{.FileCount}} files</span>
+                            <span style="margin: 0 0.5rem; opacity: 0.3;">|</span>
+                            <span style="color: var(--text-muted);">{{formatBytes .TotalSize}} total</span>
+                            <span style="margin: 0 0.5rem; opacity: 0.3;">|</span>
+                            <span style="color: var(--text-muted);">{{.Collection.ViewCount}} views</span>
+                        </div>
+                        {{if .Collection.ExpiryTime}}
+                        <div style="color: var(--warning);">
+                            Expires: {{.Collection.ExpiryTime.Format "Jan 02, 2006 15:04"}}
+                        </div>
+                        {{end}}
+                    </div>
+                </div>
+
+                {{if .DeleteToken}}
+                <div class="alert alert-success" style="margin-bottom: 1.5rem;">
+                    <strong>Collection created!</strong> Save this delete link:
+                    <a href="/cd/{{.Collection.ID}}/{{.DeleteToken}}" style="word-break: break-all; color: var(--primary);">
+                        /cd/{{.Collection.ID}}/{{.DeleteToken}}
+                    </a>
+                </div>
+                {{end}}
+
+                <!-- Files List -->
+                <div class="glass-panel" style="padding: 0;">
+                    <h3 style="padding: 1rem; border-bottom: 1px solid var(--border-color);">Files in Collection</h3>
+                    {{if .Files}}
+                    <div style="overflow-x: auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Filename</th>
+                                    <th>Size</th>
+                                    <th>Type</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range $i, $f := .Files}}
+                                <tr>
+                                    <td>{{inc $i}}</td>
+                                    <td>
+                                        <a href="/view/{{$f.ID}}" style="color: var(--primary);">{{$f.Filename}}</a>
+                                    </td>
+                                    <td>{{formatBytes $f.Size}}</td>
+                                    <td>
+                                        <span class="tag tag-blue">{{$f.MimeType}}</span>
+                                    </td>
+                                    <td>
+                                        <a href="/f/{{$f.ID}}" class="btn" style="padding: 0.3rem 0.75rem; font-size: 0.85rem;">Download</a>
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+                    {{else}}
+                    <div style="padding: 3rem; text-align: center; color: var(--text-muted);">
+                        No files in this collection.
+                    </div>
+                    {{end}}
+                </div>
+
+                {{end}}
+
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/report">Report Abuse</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>

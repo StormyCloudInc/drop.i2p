@@ -9,11 +9,20 @@ import (
 var DB *sql.DB
 
 func Init(dataSourceName string) error {
+	// Add pragmas for better concurrency
+	dataSourceName = dataSourceName + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+
 	var err error
 	DB, err = sql.Open("sqlite", dataSourceName)
 	if err != nil {
 		return err
 	}
+
+	// Set connection limits to avoid "database is locked" with too many writers,
+	// although WAL supports concurrency, keeping it reasonable helps.
+	// modernc/sqlite can be sensitive.
+	DB.SetMaxOpenConns(1) // Strict serializability to prevent locking errors
+	DB.SetMaxIdleConns(1)
 
 	if err = DB.Ping(); err != nil {
 		return err
@@ -128,6 +137,8 @@ func createTables() error {
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('total_downloads', 0);
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('total_api_uploads', 0);
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('total_bytes_stored', 0);
+	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('photodna_blocked', 0);
+	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('clamav_blocked', 0);
 
 	-- Chunked uploads table for resumable uploads
 	CREATE TABLE IF NOT EXISTS chunked_uploads (
@@ -160,6 +171,45 @@ func createTables() error {
 		PRIMARY KEY (upload_id, chunk_index),
 		FOREIGN KEY(upload_id) REFERENCES chunked_uploads(id) ON DELETE CASCADE
 	);
+
+	-- Stats history for analytics dashboard
+	CREATE TABLE IF NOT EXISTS stats_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		total_files INTEGER DEFAULT 0,
+		total_pastes INTEGER DEFAULT 0,
+		total_bytes INTEGER DEFAULT 0,
+		total_downloads INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_stats_history_date ON stats_history(recorded_at);
+
+	-- Collections for grouping files
+	CREATE TABLE IF NOT EXISTS collections (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		description TEXT,
+		uploader_dest TEXT,
+		delete_token TEXT,
+		password_hash TEXT,
+		expiry_time DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		view_count INTEGER DEFAULT 0,
+		is_blocked BOOLEAN DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_collections_expiry ON collections(expiry_time);
+	CREATE INDEX IF NOT EXISTS idx_collections_token ON collections(delete_token);
+
+	-- Collection files junction table
+	CREATE TABLE IF NOT EXISTS collection_files (
+		collection_id TEXT NOT NULL,
+		file_id TEXT NOT NULL,
+		position INTEGER DEFAULT 0,
+		added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (collection_id, file_id),
+		FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+		FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_collection_files_cid ON collection_files(collection_id);
 	`
 	_, err := DB.Exec(sqlStmt)
 	return err

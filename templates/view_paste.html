@@ -7,11 +7,9 @@
     <title>View Paste - I2P Secure Share</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark-reasonable.min.css">
     <style>
         .code-container {
-            background-color: #282c34;
+            background-color: #282a36;
             border-radius: var(--radius-md);
             border: 1px solid var(--border-color);
             overflow: hidden;
@@ -27,7 +25,7 @@
             font-family: 'Fira Code', 'Courier New', Courier, monospace;
             font-size: 14px;
             line-height: 1.6;
-            color: #abb2bf;
+            color: #f8f8f2;
             overflow-x: auto;
         }
 
@@ -105,7 +103,7 @@
                 <div class="meta-bar">
                     <span style="color: var(--text-muted);">Language: <strong
                             style="color: var(--primary);">{{.DisplayLanguage}}</strong></span>
-                    <form method="get" action="/p/{{.Paste.ID}}"
+                    <form method="get" action="/p/{{.Paste.ID}}" id="lang-form"
                         style="display: flex; gap: 0.5rem; align-items: center;">
                         <label for="lang"
                             style="color: var(--text-muted); font-size: 0.9rem; margin: 0;">Syntax:</label>
@@ -119,37 +117,30 @@
                             <option value="go" {{if eq .DisplayLanguage "go" }}selected{{end}}>Go</option>
                             <option value="html" {{if eq .DisplayLanguage "html" }}selected{{end}}>HTML</option>
                             <option value="java" {{if eq .DisplayLanguage "java" }}selected{{end}}>Java</option>
-                            <option value="javascript" {{if eq .DisplayLanguage "javascript" }}selected{{end}}>
-                                JavaScript
-                            </option>
+                            <option value="javascript" {{if eq .DisplayLanguage "javascript" }}selected{{end}}>JavaScript</option>
                             <option value="json" {{if eq .DisplayLanguage "json" }}selected{{end}}>JSON</option>
                             <option value="python" {{if eq .DisplayLanguage "python" }}selected{{end}}>Python</option>
                             <option value="ruby" {{if eq .DisplayLanguage "ruby" }}selected{{end}}>Ruby</option>
                             <option value="rust" {{if eq .DisplayLanguage "rust" }}selected{{end}}>Rust</option>
                             <option value="sql" {{if eq .DisplayLanguage "sql" }}selected{{end}}>SQL</option>
-                            <option value="typescript" {{if eq .DisplayLanguage "typescript" }}selected{{end}}>
-                                TypeScript
-                            </option>
+                            <option value="typescript" {{if eq .DisplayLanguage "typescript" }}selected{{end}}>TypeScript</option>
                             <option value="xml" {{if eq .DisplayLanguage "xml" }}selected{{end}}>XML</option>
                             <option value="yaml" {{if eq .DisplayLanguage "yaml" }}selected{{end}}>YAML</option>
                         </select>
-                        <noscript><button type="submit" class="btn"
-                                style="padding: 0.25rem 0.5rem; font-size: 0.9rem;">Apply</button></noscript>
+                        <noscript><button type="submit" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.9rem;">Apply</button></noscript>
                     </form>
                 </div>
 
                 <div class="code-container">
-                    <pre class="code-content"><code class="language-{{.DisplayLanguage}}">{{.Content}}</code></pre>
+                    <pre class="code-content">{{.Content}}</pre>
                 </div>
 
                 <div class="glass-panel" style="padding: 1.5rem; max-width: 800px; margin: 0 auto;">
                     <div class="download-box">
                         <span style="color: var(--text-muted); font-size: 0.9rem; white-space: nowrap;">Share
                             Link:</span>
-                        <input type="text" id="share-link" value="{{.Host}}/p/{{.Paste.ID}}" readonly
+                        <input type="text" value="{{.Host}}/p/{{.Paste.ID}}" readonly
                             onclick="this.select()">
-                        <button id="copy-button" class="btn"
-                            style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(56, 189, 248, 0.2); color: var(--primary);">Copy</button>
                         <a href="/p/{{.Paste.ID}}/raw" target="_blank" class="btn"
                             style="padding: 0.4rem 0.8rem; font-size: 0.8rem; text-decoration: none;">Raw</a>
                     </div>
@@ -157,34 +148,31 @@
                     {{if .DeleteToken}}
                     <div class="download-box" style="border-color: rgba(248, 113, 113, 0.3);">
                         <span style="color: var(--error); font-size: 0.9rem; white-space: nowrap;">Delete Link:</span>
-                        <input type="text" id="delete-link" value="{{.Host}}/pd/{{.Paste.ID}}/{{.DeleteToken}}" readonly
+                        <input type="text" value="{{.Host}}/pd/{{.Paste.ID}}/{{.DeleteToken}}" readonly
                             onclick="this.select()" style="color: var(--error);">
-                        <button id="copy-delete-button" class="btn"
-                            style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(248, 113, 113, 0.1); color: var(--error);">Copy</button>
                     </div>
                     {{end}}
 
                     <div class="report-section">
-                        <button id="show-report-form" class="btn"
-                            style="background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.9rem;">Report
-                            Abuse</button>
-
-                        <div id="report-form" class="report-form hidden">
-                            <form action="/report" method="post">
-                                <input type="hidden" name="file_url" value="/p/{{.Paste.ID}}">
-                                <div class="mb-4">
-                                    <label>Reason</label>
-                                    <select name="reason">
-                                        <option value="illegal">Illegal content</option>
-                                        <option value="malware">Malware/Virus code</option>
-                                        <option value="copyright">Copyright violation</option>
-                                        <option value="spam">Spam</option>
-                                        <option value="other">Other</option>
-                                    </select>
-                                </div>
-                                <button type="submit" class="btn btn-danger w-full">Submit Report</button>
-                            </form>
-                        </div>
+                        <details>
+                            <summary class="btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.9rem; cursor: pointer; list-style: none;">Report Abuse</summary>
+                            <div class="report-form" style="margin-top: 1rem;">
+                                <form action="/report" method="post">
+                                    <input type="hidden" name="file_url" value="/p/{{.Paste.ID}}">
+                                    <div class="mb-4">
+                                        <label>Reason</label>
+                                        <select name="reason">
+                                            <option value="illegal">Illegal content</option>
+                                            <option value="malware">Malware/Virus code</option>
+                                            <option value="copyright">Copyright violation</option>
+                                            <option value="spam">Spam</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-danger w-full">Submit Report</button>
+                                </form>
+                            </div>
+                        </details>
                     </div>
                 </div>
 
@@ -203,35 +191,6 @@
             </footer>
         </div>
 
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-        <script>
-            hljs.highlightAll();
-
-            // Icon copy helper
-            function setupCopy(btnId, inputId) {
-                const btn = document.getElementById(btnId);
-                if (!btn) return;
-                btn.addEventListener('click', () => {
-                    const inp = document.getElementById(inputId);
-                    inp.select();
-                    document.execCommand('copy');
-                    const originalText = btn.textContent;
-                    btn.textContent = 'Copied!';
-                    setTimeout(() => btn.textContent = originalText, 2000);
-                });
-            }
-            setupCopy('copy-button', 'share-link');
-            setupCopy('copy-delete-button', 'delete-link');
-
-            // Toggle Report
-            const showReportBtn = document.getElementById('show-report-form');
-            const reportForm = document.getElementById('report-form');
-            if (showReportBtn && reportForm) {
-                showReportBtn.addEventListener('click', () => {
-                    reportForm.classList.toggle('hidden');
-                });
-            }
-        </script>
 </body>
 
 </html>

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,9 +73,9 @@ func (rl *RateLimiter) getBucket(destB32 string) *destinationBucket {
 }
 
 // AllowUpload checks if an upload is allowed for this destination
-func (rl *RateLimiter) AllowUpload(destB32 string) bool {
+func (rl *RateLimiter) AllowUpload(destB32 string) (bool, time.Duration) {
 	if destB32 == "" {
-		return true // Allow if no destination (clearnet or testing)
+		return true, 0 // Allow if no destination (clearnet or testing)
 	}
 
 	bucket := rl.getBucket(destB32)
@@ -90,17 +91,18 @@ func (rl *RateLimiter) AllowUpload(destB32 string) bool {
 	}
 
 	if bucket.uploads >= rl.config.UploadsPerHour {
-		return false
+		wait := time.Hour - now.Sub(bucket.lastUploadReset)
+		return false, wait
 	}
 
 	bucket.uploads++
-	return true
+	return true, 0
 }
 
 // AllowDownload checks if a download is allowed for this destination
-func (rl *RateLimiter) AllowDownload(destB32 string) bool {
+func (rl *RateLimiter) AllowDownload(destB32 string) (bool, time.Duration) {
 	if destB32 == "" {
-		return true
+		return true, 0
 	}
 
 	bucket := rl.getBucket(destB32)
@@ -116,11 +118,12 @@ func (rl *RateLimiter) AllowDownload(destB32 string) bool {
 	}
 
 	if bucket.downloads >= rl.config.DownloadsPerHour {
-		return false
+		wait := time.Hour - now.Sub(bucket.lastDownloadReset)
+		return false, wait
 	}
 
 	bucket.downloads++
-	return true
+	return true, 0
 }
 
 // AllowReport checks if a report is allowed for this destination
@@ -195,7 +198,8 @@ func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 
 				if !isChunkUpload {
 					// Regular uploads and chunked init/complete count against rate limit
-					if !limiter.AllowUpload(destB32) {
+					if allowed, wait := limiter.AllowUpload(destB32); !allowed {
+						w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 						http.Error(w, "Rate limit exceeded. Please try again later.", http.StatusTooManyRequests)
 						return
 					}
@@ -203,7 +207,8 @@ func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 			case "GET":
 				// Downloads (only for /f/ routes)
 				if len(r.URL.Path) > 3 && r.URL.Path[:3] == "/f/" {
-					if !limiter.AllowDownload(destB32) {
+					if allowed, wait := limiter.AllowDownload(destB32); !allowed {
+						w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 						http.Error(w, "Rate limit exceeded. Please try again later.", http.StatusTooManyRequests)
 						return
 					}

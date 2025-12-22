@@ -37,15 +37,16 @@
                 {{end}}
 
                 <div class="admin-nav">
-                    <a href="/admin">Files</a>
-                    <a href="/admin/reports">Reports</a>
-                    <a href="/admin/bans" class="active">Bans</a>
-                    <a href="/admin/tools">Tools</a>
+                    <a href="{{.AdminURL}}">Files</a>
+                    <a href="{{.AdminURL}}/reports">Reports</a>
+                    <a href="{{.AdminURL}}/bans" class="active">Bans</a>
+                    <a href="{{.AdminURL}}/tools">Tools</a>
+                    <a href="{{.AdminURL}}/analytics">Analytics</a>
                 </div>
 
                 <div class="glass-panel" style="padding: 2rem; margin-bottom: 2rem;">
                     <h2 class="mb-4">Create New Ban</h2>
-                    <form action="/admin/bans" method="POST">
+                    <form action="{{.AdminURL}}/bans" method="POST">
                         <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; margin-bottom: 1rem;">
                             <div>
                                 <label
@@ -123,7 +124,7 @@
                                         {{end}}
                                     </td>
                                     <td>
-                                        <form action="/admin/bans/{{.ID}}" method="POST"
+                                        <form action="{{$.AdminURL}}/bans/{{.ID}}" method="POST"
                                             onsubmit="return confirm('Remove this ban?');" style="display:inline;">
                                             <input type="hidden" name="_method" value="DELETE">
                                             <button class="btn"
