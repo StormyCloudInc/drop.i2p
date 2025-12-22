@@ -2,7 +2,10 @@ package server
 
 import (
 	"net/http"
+	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"drop-i2p/internal/clamav"
 	"drop-i2p/internal/config"
@@ -17,15 +20,84 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+// AnnouncementReader reads and caches announcement content from file
+type AnnouncementReader struct {
+	filePath    string
+	content     string
+	lastModTime time.Time
+	mu          sync.RWMutex
+}
+
+// NewAnnouncementReader creates a new announcement reader
+func NewAnnouncementReader(filePath string) *AnnouncementReader {
+	ar := &AnnouncementReader{filePath: filePath}
+	ar.refresh() // Initial load
+	return ar
+}
+
+// Get returns the current announcement message (empty if no file or empty file)
+func (ar *AnnouncementReader) Get() string {
+	ar.mu.RLock()
+	defer ar.mu.RUnlock()
+	return ar.content
+}
+
+// refresh checks if file has changed and reloads if necessary
+func (ar *AnnouncementReader) refresh() {
+	if ar.filePath == "" {
+		return
+	}
+
+	info, err := os.Stat(ar.filePath)
+	if err != nil {
+		// File doesn't exist or can't be read - clear announcement
+		ar.mu.Lock()
+		ar.content = ""
+		ar.mu.Unlock()
+		return
+	}
+
+	// Check if file was modified
+	if !info.ModTime().After(ar.lastModTime) {
+		return
+	}
+
+	// Read file content
+	data, err := os.ReadFile(ar.filePath)
+	if err != nil {
+		ar.mu.Lock()
+		ar.content = ""
+		ar.mu.Unlock()
+		return
+	}
+
+	ar.mu.Lock()
+	ar.content = strings.TrimSpace(string(data))
+	ar.lastModTime = info.ModTime()
+	ar.mu.Unlock()
+}
+
+// StartAutoRefresh starts a goroutine that periodically checks for file changes
+func (ar *AnnouncementReader) StartAutoRefresh(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			ar.refresh()
+		}
+	}()
+}
+
 type Server struct {
-	cfg         *config.Config
-	store       *storage.Manager
-	transport   i2p.Transport
-	rateLimiter *mw.RateLimiter
-	stripper    *metadata.Stripper
-	photoDNA    *photodna.Scanner
-	clamAV      *clamav.Scanner
-	webhook     *webhook.Notifier
+	cfg          *config.Config
+	store        *storage.Manager
+	transport    i2p.Transport
+	rateLimiter  *mw.RateLimiter
+	stripper     *metadata.Stripper
+	photoDNA     *photodna.Scanner
+	clamAV       *clamav.Scanner
+	webhook      *webhook.Notifier
+	announcement *AnnouncementReader
 }
 
 func New(cfg *config.Config, store *storage.Manager) *Server {
@@ -47,15 +119,20 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 	// Initialize webhook notifier
 	webhookNotifier := webhook.NewNotifier(cfg)
 
+	// Initialize announcement reader (auto-refreshes every 30 seconds)
+	announcementReader := NewAnnouncementReader(cfg.AnnouncementFile)
+	announcementReader.StartAutoRefresh(30 * time.Second)
+
 	return &Server{
-		cfg:         cfg,
-		store:       store,
-		transport:   transport,
-		rateLimiter: rateLimiter,
-		stripper:    stripper,
-		photoDNA:    photoDNAScanner,
-		clamAV:      clamAVScanner,
-		webhook:     webhookNotifier,
+		cfg:          cfg,
+		store:        store,
+		transport:    transport,
+		rateLimiter:  rateLimiter,
+		stripper:     stripper,
+		photoDNA:     photoDNAScanner,
+		clamAV:       clamAVScanner,
+		webhook:      webhookNotifier,
+		announcement: announcementReader,
 	}
 }
 

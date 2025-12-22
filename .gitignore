@@ -8,7 +8,11 @@ database.db-*
 # Build artifacts
 drop
 drop.exe
+drop-linux
 drop-linux-amd64
+drop-i2p
+drop-i2p.exe
+drop-i2p-linux
 genkeys
 hashpw
 *.exe

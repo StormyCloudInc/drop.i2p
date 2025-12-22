@@ -11,6 +11,13 @@
 
 <body>
 
+    {{if .Announcement}}
+    <div
+        style="background: rgba(56, 189, 248, 0.1); border-bottom: 1px solid rgba(56, 189, 248, 0.2); padding: 0.75rem; text-align: center; color: var(--text-main);">
+        <strong>Notice:</strong> {{.Announcement}}
+    </div>
+    {{end}}
+
     <div class="main-wrapper">
         <div class="app-container">
 
@@ -114,6 +121,54 @@
                         No files in this collection.
                     </div>
                     {{end}}
+                </div>
+
+                <!-- Share Link -->
+                <div class="glass-panel" style="padding: 1.5rem; margin-top: 1.5rem;">
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.5rem;">Share Link:</label>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <input type="text" id="share-link" value="{{.Host}}/c/{{.Collection.ID}}" readonly onclick="this.select()" style="flex: 1; margin: 0;">
+                            <button type="button" class="btn" id="copy-btn" style="padding: 0.5rem 1rem; white-space: nowrap;">Copy</button>
+                        </div>
+                    </div>
+                    <script>
+                        document.getElementById('copy-btn').addEventListener('click', function() {
+                            var link = document.getElementById('share-link').value;
+                            navigator.clipboard.writeText(link).then(function() {
+                                document.getElementById('copy-btn').textContent = 'Copied!';
+                                setTimeout(function() {
+                                    document.getElementById('copy-btn').textContent = 'Copy';
+                                }, 2000);
+                            });
+                        });
+                    </script>
+
+                    <div class="report-section" style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem; text-align: center;">
+                        <details>
+                            <summary class="btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.9rem; cursor: pointer; list-style: none;">Report Abuse</summary>
+                            <div style="max-width: 400px; margin: 1rem auto; text-align: left;">
+                                <form action="/report" method="post">
+                                    <input type="hidden" name="file_url" value="/c/{{.Collection.ID}}">
+                                    <div class="mb-4">
+                                        <label>Reason</label>
+                                        <select name="reason">
+                                            <option value="illegal">Illegal content</option>
+                                            <option value="malware">Malware/Virus</option>
+                                            <option value="copyright">Copyright violation</option>
+                                            <option value="spam">Spam</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-danger w-full">Submit Report</button>
+                                </form>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+
+                <div class="text-center mt-8">
+                    <a href="/" style="color: var(--primary);">Upload another file</a>
                 </div>
 
                 {{end}}

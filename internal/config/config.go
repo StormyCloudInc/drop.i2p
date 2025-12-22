@@ -38,6 +38,9 @@ type Config struct {
 	WebhookEvents  string // SSP_WEBHOOK_EVENTS - comma-separated events: report,storage
 	WebhookTimeout int    // SSP_WEBHOOK_TIMEOUT - timeout in seconds (default: 10)
 	StorageAlertGB int    // SSP_STORAGE_ALERT_GB - threshold for storage alerts
+
+	// Announcement banner
+	AnnouncementFile string // SSP_ANNOUNCEMENT_FILE - path to announcement.txt file
 }
 
 func Load() *Config {
@@ -94,6 +97,7 @@ func Load() *Config {
 		WebhookEvents:     getEnv("SSP_WEBHOOK_EVENTS", "report,storage"),
 		WebhookTimeout:    parseIntEnv("SSP_WEBHOOK_TIMEOUT", 10),
 		StorageAlertGB:    parseIntEnv("SSP_STORAGE_ALERT_GB", 0),
+		AnnouncementFile:  getEnv("SSP_ANNOUNCEMENT_FILE", "announcement.txt"),
 	}
 }
 

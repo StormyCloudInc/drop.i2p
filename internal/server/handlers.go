@@ -65,6 +65,7 @@ var templates = template.Must(template.New("").Funcs(templateFuncs).ParseFiles(
 	"templates/admin_tools.html",
 	"templates/admin_analytics.html",
 	"templates/report.html",
+	"templates/donate.html",
 	"templates/error.html",
 	"templates/message.html",
 ))
@@ -144,8 +145,9 @@ func handleNotFound(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.store.GetStats()
 	data := map[string]interface{}{
-		"Stats": stats,
-		"Host":  r.Host,
+		"Stats":        stats,
+		"Host":         r.Host,
+		"Announcement": s.announcement.Get(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -183,7 +185,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Validate file type (extension and MIME type blacklist)
 	mimeType := header.Header.Get("Content-Type")
 	if valid, reason := validator.ValidateFile(header.Filename, mimeType); !valid {
-		http.Error(w, reason, http.StatusBadRequest)
+		renderMessage(w, http.StatusBadRequest, "error", "File Type Not Allowed", reason)
 		return
 	}
 
@@ -410,6 +412,7 @@ func (s *Server) handleViewFile(w http.ResponseWriter, r *http.Request) {
 		"DownloadCount":       file.DownloadCount + 1, // Actual download count (since it starts at -1)
 		"Flash":               flash,
 		"FlashType":           flashType,
+		"Announcement":        s.announcement.Get(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1110,6 +1113,7 @@ func (s *Server) handleViewPaste(w http.ResponseWriter, r *http.Request) {
 		"DeleteToken":     deleteToken,
 		"Host":            scheme + "://" + host,
 		"DisplayLanguage": displayLanguage,
+		"Announcement":    s.announcement.Get(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1388,8 +1392,11 @@ func (s *Server) handleAPIPaste(w http.ResponseWriter, r *http.Request) {
 
 // handleDonate shows the donation page
 func (s *Server) handleDonate(w http.ResponseWriter, r *http.Request) {
-	// For now, redirect to static donate.html if it exists
-	http.ServeFile(w, r, "templates/donate.html")
+	data := map[string]interface{}{
+		"Announcement": s.announcement.Get(),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "donate.html", data)
 }
 
 // handleReportPage shows the public report page
@@ -1398,8 +1405,9 @@ func (s *Server) handleReportPage(w http.ResponseWriter, r *http.Request) {
 	flashType := r.URL.Query().Get("flash_type")
 
 	data := map[string]interface{}{
-		"Flash":     flash,
-		"FlashType": flashType,
+		"Flash":        flash,
+		"FlashType":    flashType,
+		"Announcement": s.announcement.Get(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "report.html", data)
@@ -1781,10 +1789,11 @@ func (s *Server) handleViewCollection(w http.ResponseWriter, r *http.Request) {
 		if err != nil || cookie.Value != "unlocked" {
 			// Show password form
 			data := map[string]interface{}{
-				"Collection":       collection,
-				"NeedsPassword":    true,
-				"Flash":            r.URL.Query().Get("flash"),
-				"FlashType":        r.URL.Query().Get("flash_type"),
+				"Collection":    collection,
+				"NeedsPassword": true,
+				"Flash":         r.URL.Query().Get("flash"),
+				"FlashType":     r.URL.Query().Get("flash_type"),
+				"Announcement":  s.announcement.Get(),
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			templates.ExecuteTemplate(w, "view_collection.html", data)
@@ -1807,6 +1816,13 @@ func (s *Server) handleViewCollection(w http.ResponseWriter, r *http.Request) {
 		totalSize += f.Size
 	}
 
+	// Build host URL
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+
 	data := map[string]interface{}{
 		"Collection":    collection,
 		"Files":         files,
@@ -1816,6 +1832,8 @@ func (s *Server) handleViewCollection(w http.ResponseWriter, r *http.Request) {
 		"Flash":         r.URL.Query().Get("flash"),
 		"FlashType":     r.URL.Query().Get("flash_type"),
 		"DeleteToken":   r.URL.Query().Get("token"),
+		"Host":          scheme + "://" + host,
+		"Announcement":  s.announcement.Get(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1897,9 +1915,9 @@ func (s *Server) handleAPICreateCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Auto-generate title if not provided
 	if req.Title == "" {
-		http.Error(w, "Title is required", http.StatusBadRequest)
-		return
+		req.Title = fmt.Sprintf("Collection - %s", time.Now().Format("Jan 02, 2006"))
 	}
 
 	if len(req.FileIDs) == 0 {

@@ -484,7 +484,8 @@ func (m *Manager) ListFiles(limit int) ([]*models.File, error) {
 	rows, err := db.DB.Query(`
 		SELECT id, filename, COALESCE(original_filename, filename), size, mime_type,
 		       COALESCE(content_hash, ''), upload_time, expiry_time, is_encrypted,
-		       COALESCE(is_blocked, 0), COALESCE(uploader_dest, ''), download_count
+		       COALESCE(is_blocked, 0), COALESCE(uploader_dest, ''), download_count,
+		       COALESCE(encryption_version, 1)
 		FROM files ORDER BY upload_time DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -496,7 +497,7 @@ func (m *Manager) ListFiles(limit int) ([]*models.File, error) {
 		var f models.File
 		if err := rows.Scan(&f.ID, &f.Filename, &f.OriginalFilename, &f.Size, &f.MimeType,
 			&f.ContentHash, &f.UploadTime, &f.ExpiryTime, &f.IsEncrypted,
-			&f.IsBlocked, &f.UploaderDest, &f.DownloadCount); err == nil {
+			&f.IsBlocked, &f.UploaderDest, &f.DownloadCount, &f.EncryptionVersion); err == nil {
 			files = append(files, &f)
 		}
 	}

@@ -11,12 +11,19 @@
 
 <body>
 
+    {{if .Announcement}}
+    <div
+        style="background: rgba(56, 189, 248, 0.1); border-bottom: 1px solid rgba(56, 189, 248, 0.2); padding: 0.75rem; text-align: center; color: var(--text-main);">
+        <strong>Notice:</strong> {{.Announcement}}
+    </div>
+    {{end}}
+
     <div class="main-wrapper">
         <div class="app-container" style="max-width: 600px;">
 
             <header class="header-section">
                 <a href="/" style="display: inline-block; margin-bottom: 1.5rem;">
-                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 60px;">
+                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 79px;">
                 </a>
                 <h1>Report Content</h1>
                 <p style="color: var(--text-muted);">Report files that violate our terms of service</p>
