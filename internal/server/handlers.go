@@ -1,0 +1,2042 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"drop-i2p/internal/i2p"
+	mw "drop-i2p/internal/middleware"
+	"drop-i2p/internal/models"
+	"drop-i2p/internal/storage"
+	"drop-i2p/internal/validator"
+
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/formatters/html"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+)
+
+// Template helper functions
+var templateFuncs = template.FuncMap{
+	"inc": func(i int) int {
+		return i + 1
+	},
+	"truncate": func(s string, n int) string {
+		if len(s) <= n {
+			return s
+		}
+		return s[:n] + "..."
+	},
+	"formatBytes": func(bytes int64) string {
+		const unit = 1024
+		if bytes < unit {
+			return fmt.Sprintf("%d B", bytes)
+		}
+		div, exp := int64(unit), 0
+		for n := bytes / unit; n >= unit; n /= unit {
+			div *= unit
+			exp++
+		}
+		return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+	},
+}
+
+// Templates - caching for performance
+// Only load the templates used by the Go server (not the legacy Flask templates)
+var templates = template.Must(template.New("").Funcs(templateFuncs).ParseFiles(
+	"templates/index.html",
+	"templates/upload_result.html",
+	"templates/view_file.html",
+	"templates/view_paste.html",
+	"templates/view_collection.html",
+	"templates/admin.html",
+	"templates/admin_reports.html",
+	"templates/admin_bans.html",
+	"templates/admin_tools.html",
+	"templates/admin_analytics.html",
+	"templates/report.html",
+	"templates/donate.html",
+	"templates/error.html",
+	"templates/message.html",
+))
+
+// highlightCode applies syntax highlighting to code using Chroma
+// Returns HTML with inline styles (no external CSS needed)
+func highlightCode(code, language string) template.HTML {
+	// Get lexer for language
+	var lexer chroma.Lexer
+	if language == "" || language == "text" {
+		lexer = lexers.Fallback
+	} else {
+		lexer = lexers.Get(language)
+		if lexer == nil {
+			lexer = lexers.Fallback
+		}
+	}
+	lexer = chroma.Coalesce(lexer)
+
+	// Use a dark theme that matches our UI
+	style := styles.Get("dracula")
+	if style == nil {
+		style = styles.Fallback
+	}
+
+	// Create HTML formatter with inline styles (no external CSS)
+	formatter := html.New(
+		html.WithClasses(false), // Use inline styles
+		html.PreventSurroundingPre(true),
+	)
+
+	// Tokenize and format
+	iterator, err := lexer.Tokenise(nil, code)
+	if err != nil {
+		return template.HTML(template.HTMLEscapeString(code))
+	}
+
+	var buf bytes.Buffer
+	if err := formatter.Format(&buf, style, iterator); err != nil {
+		return template.HTML(template.HTMLEscapeString(code))
+	}
+
+	return template.HTML(buf.String())
+}
+
+// renderError renders a styled error page
+func renderError(w http.ResponseWriter, statusCode int, icon, title, message, details string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(statusCode)
+	data := map[string]interface{}{
+		"Icon":    icon,
+		"Title":   title,
+		"Message": message,
+		"Details": details,
+	}
+	templates.ExecuteTemplate(w, "error.html", data)
+}
+
+// renderMessage renders a styled message page (success, error, warning, info)
+// msgType should be: "success", "error", "warning", or "info"
+func renderMessage(w http.ResponseWriter, statusCode int, msgType, title, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(statusCode)
+	data := map[string]interface{}{
+		"Type":    msgType,
+		"Title":   title,
+		"Message": message,
+	}
+	templates.ExecuteTemplate(w, "message.html", data)
+}
+
+// handleNotFound renders a styled 404 page
+func handleNotFound(w http.ResponseWriter, r *http.Request) {
+	renderMessage(w, http.StatusNotFound, "error", "Page Not Found", "The page you are looking for does not exist.")
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	stats, _ := s.store.GetStats()
+	data := map[string]interface{}{
+		"Stats":        stats,
+		"Host":         r.Host,
+		"Announcement": s.announcement.Get(),
+		"CSRFToken":    mw.GetCSRFToken(r),
+		"Version":      s.version,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "index.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	// Parse Multipart Form
+	// Limit to 55MB to accommodate 50MB files + multipart overhead
+	r.Body = http.MaxBytesReader(w, r.Body, 55<<20)
+	if err := r.ParseMultipartForm(55 << 20); err != nil {
+		renderMessage(w, http.StatusRequestEntityTooLarge, "error", "File Too Large", "The file exceeds the maximum upload size of 50MB.")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "No file uploaded", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Get uploader's I2P destination from context (set by I2P middleware)
+	uploaderDest := i2p.GetDestinationFromRequest(r)
+
+	// Check if destination is banned
+	if uploaderDest != "" {
+		if banned, _ := s.store.IsDestinationBanned(uploaderDest); banned {
+			http.Error(w, "Upload not allowed", http.StatusForbidden)
+			return
+		}
+	}
+
+	// Validate file type (extension and MIME type blacklist)
+	mimeType := header.Header.Get("Content-Type")
+	if valid, reason := validator.ValidateFile(header.Filename, mimeType); !valid {
+		renderMessage(w, http.StatusBadRequest, "error", "File Type Not Allowed", reason)
+		return
+	}
+
+	// Sanitize filename
+	header.Filename = validator.SanitizeFilename(header.Filename)
+
+	// Read Options
+	expiryStr := r.FormValue("expiry")
+
+	// Parse expiry - max 30 days, no permanent option
+	// Default 24h if not specified
+	duration := 24 * time.Hour
+	if expiryStr != "" && expiryStr != "permanent" {
+		if d, err := time.ParseDuration(expiryStr); err == nil {
+			duration = d
+		}
+	}
+	// Cap at 30 days maximum
+	maxDuration := 30 * 24 * time.Hour
+	if duration > maxDuration {
+		duration = maxDuration
+	}
+	t := time.Now().Add(duration)
+	expiryTime := &t
+
+	// Build upload options
+	opts := &storage.UploadOptions{
+		MetadataStripped: true, // Default: strip metadata
+	}
+
+	// Check if user wants to keep metadata
+	keepMetadata := r.FormValue("keep_metadata") == "on" || r.FormValue("keep_metadata") == "true"
+	opts.MetadataStripped = !keepMetadata
+
+	// Handle password protection
+	password := r.FormValue("password")
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "Failed to process password", http.StatusInternalServerError)
+			return
+		}
+		opts.PasswordHash = string(hash)
+	}
+
+	// Handle max downloads
+	maxDownloadsStr := r.FormValue("max_downloads")
+	if maxDownloadsStr != "" {
+		if maxVal, err := strconv.Atoi(maxDownloadsStr); err == nil && maxVal > 0 {
+			opts.MaxDownloads = &maxVal
+		}
+	}
+
+	// Generate ID and Token
+	fileID := uuid.New().String()
+	deleteToken := uuid.New().String()
+
+	// Read file data for scanning
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// PhotoDNA check for images (before encryption/storage)
+	if s.photoDNA.ShouldCheck(mimeType) {
+		if blocked, _ := s.photoDNA.CheckImage(r.Context(), fileData); blocked {
+			s.store.IncrementStat("photodna_blocked")
+			renderMessage(w, http.StatusForbidden, "error", "Upload Blocked", "This content cannot be uploaded.")
+			return
+		}
+	}
+
+	// ClamAV check for non-image files (before encryption/storage)
+	if s.clamAV.ShouldCheck(mimeType) {
+		if infected, threat, _ := s.clamAV.CheckFile(r.Context(), fileData); infected {
+			s.store.IncrementStat("clamav_blocked")
+			renderMessage(w, http.StatusForbidden, "error", "Upload Blocked", fmt.Sprintf("File contains malware: %s", threat))
+			return
+		}
+	}
+
+	var fileReader io.Reader = bytes.NewReader(fileData)
+
+	// Save File
+	savedFile, err := s.store.SaveFile(fileID, fileReader, header.Filename, mimeType, expiryTime, deleteToken, uploaderDest, opts)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Strip metadata if not keeping it
+	if !keepMetadata && s.stripper.CanStrip(mimeType) {
+		// For non-chunked uploads, we need to strip metadata from the assembled file
+		// This is handled at download time for chunked uploads
+		// TODO: Implement temp file metadata stripping for regular uploads
+	}
+
+	// Check if content hash is blocked (post-upload check)
+	if blocked, _ := s.store.IsHashBlocked(savedFile.ContentHash); blocked {
+		// Delete the file we just uploaded
+		s.store.DeleteFile(fileID)
+		renderMessage(w, http.StatusForbidden, "error", "Content Not Allowed", "This content has been blocked and cannot be uploaded.")
+		return
+	}
+
+	// Redirect to view page with delete token as query param (so user sees it once)
+	http.Redirect(w, r, fmt.Sprintf("/view/%s?token=%s", savedFile.ID, deleteToken), http.StatusSeeOther)
+}
+
+// handleViewFile shows the file view page
+func (s *Server) handleViewFile(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+	deleteToken := r.URL.Query().Get("token")
+	flash := r.URL.Query().Get("flash")
+	flashType := r.URL.Query().Get("flash_type")
+
+	file, err := s.store.GetFileMetadata(fileID)
+	if err != nil {
+		renderError(w, http.StatusNotFound, "&#x1F50D;", "File Not Found",
+			"The file you're looking for doesn't exist or has been deleted.",
+			"It may have expired or been removed by the uploader.")
+		return
+	}
+
+	if file.IsBlocked {
+		renderError(w, http.StatusForbidden, "&#x1F6AB;", "File Unavailable",
+			"This file has been blocked and is no longer available.",
+			"It was removed for violating our terms of service.")
+		return
+	}
+
+	// Check if file has expired
+	if file.ExpiryTime != nil && time.Now().After(*file.ExpiryTime) {
+		renderError(w, http.StatusGone, "⏳", "File Expired",
+			"This file has expired and is no longer available.", "")
+		return
+	}
+
+	// Check if file is password protected and if user is unlocked
+	isPasswordProtected := file.PasswordHash != ""
+	isUnlocked := false
+	if isPasswordProtected {
+		// Check cookie for unlock status
+		cookie, err := r.Cookie("unlocked_" + fileID)
+		if err == nil && cookie.Value == "true" {
+			isUnlocked = true
+		}
+	}
+
+	// Calculate time left
+	var timeLeft string
+	if file.ExpiryTime != nil {
+		remaining := time.Until(*file.ExpiryTime)
+		if remaining > 0 {
+			if remaining > 24*time.Hour {
+				timeLeft = fmt.Sprintf("~%d days", int(remaining.Hours()/24))
+			} else if remaining > time.Hour {
+				timeLeft = fmt.Sprintf("~%d hours", int(remaining.Hours()))
+			} else {
+				timeLeft = fmt.Sprintf("~%d minutes", int(remaining.Minutes()))
+			}
+		}
+	}
+
+	// Determine file type for preview
+	isImage := false
+	fileType := "file"
+	mimeType := file.MimeType
+
+	// Use prefix matching for broader compatibility
+	switch {
+	case mimeType == "image/jpeg" || mimeType == "image/png" || mimeType == "image/gif" ||
+		mimeType == "image/webp" || mimeType == "image/svg+xml" || mimeType == "image/bmp":
+		isImage = true
+		fileType = "image"
+	case mimeType == "application/pdf":
+		fileType = "pdf"
+	case mimeType == "application/zip" || mimeType == "application/x-tar" ||
+		mimeType == "application/gzip" || mimeType == "application/x-7z-compressed" ||
+		mimeType == "application/x-rar-compressed" || mimeType == "application/x-bzip2":
+		fileType = "archive"
+	case strings.HasPrefix(mimeType, "video/"):
+		fileType = "video"
+	case strings.HasPrefix(mimeType, "audio/"):
+		fileType = "audio"
+	}
+
+	// Format file size
+	fileSizeFormatted := formatSize(file.Size)
+
+	// Determine host (use X-Forwarded-Host if behind proxy)
+	host := r.Host
+	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+		host = fh
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+
+	// Calculate remaining downloads (download_count starts at -1, so actual downloads = count + 1)
+	var remainingDownloads *int
+	if file.MaxDownloads != nil {
+		remaining := *file.MaxDownloads - (file.DownloadCount + 1)
+		if remaining < 0 {
+			remaining = 0
+		}
+		remainingDownloads = &remaining
+	}
+
+	// Show delete button when token is in URL - the uploader just uploaded and got redirected here
+	showDeleteButton := deleteToken != ""
+
+	data := map[string]interface{}{
+		"File":                file,
+		"TimeLeft":            timeLeft,
+		"IsImage":             isImage,
+		"FileType":            fileType,
+		"FileSizeFormatted":   fileSizeFormatted,
+		"DeleteToken":         deleteToken,
+		"ShowDeleteButton":    showDeleteButton,
+		"Host":                scheme + "://" + host,
+		"IsPasswordProtected": isPasswordProtected,
+		"IsUnlocked":          isUnlocked,
+		"NeedsPassword":       isPasswordProtected && !isUnlocked, // Show password form if protected and not yet unlocked
+		"HasMaxDownloads":     file.MaxDownloads != nil,
+		"MaxDownloads":        file.MaxDownloads,
+		"RemainingDownloads":  remainingDownloads,
+		"DownloadCount":       file.DownloadCount + 1, // Actual download count (since it starts at -1)
+		"Flash":               flash,
+		"FlashType":           flashType,
+		"Announcement":        s.announcement.Get(),
+		"CSRFToken":           mw.GetCSRFToken(r),
+		"Version":             s.version,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "view_file.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleUnlockFile handles password verification for protected files
+func (s *Server) handleUnlockFile(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, fmt.Sprintf("/view/%s?flash=Invalid+form&flash_type=error", fileID), http.StatusSeeOther)
+		return
+	}
+
+	password := r.FormValue("password")
+	if password == "" {
+		http.Redirect(w, r, fmt.Sprintf("/view/%s?flash=Password+required&flash_type=error", fileID), http.StatusSeeOther)
+		return
+	}
+
+	file, err := s.store.GetFileMetadata(fileID)
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(file.PasswordHash), []byte(password)); err != nil {
+		http.Redirect(w, r, fmt.Sprintf("/view/%s?flash=Invalid+password&flash_type=error", fileID), http.StatusSeeOther)
+		return
+	}
+
+	// Set unlock cookie (HTTP-only, session-based)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "unlocked_" + fileID,
+		Value:    "true",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		// No Expires = session cookie
+	})
+
+	http.Redirect(w, r, fmt.Sprintf("/view/%s?flash=File+unlocked&flash_type=success", fileID), http.StatusSeeOther)
+}
+
+// formatSize formats bytes to human-readable size
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+
+	file, err := s.store.GetFileMetadata(fileID)
+	if err != nil {
+		renderError(w, http.StatusNotFound, "&#x1F50D;", "File Not Found",
+			"The file you're looking for doesn't exist or has been deleted.",
+			"It may have expired or been removed by the uploader.")
+		return
+	}
+
+	// Check if file is blocked
+	if file.IsBlocked {
+		renderError(w, http.StatusForbidden, "&#x1F6AB;", "File Unavailable",
+			"This file has been blocked and is no longer available.",
+			"It was removed for violating our terms of service.")
+		return
+	}
+
+	// Check if file has expired
+	if file.ExpiryTime != nil && time.Now().After(*file.ExpiryTime) {
+		renderError(w, http.StatusGone, "⏳", "File Expired",
+			"This file has expired and is no longer available.", "")
+		return
+	}
+
+	// Check password protection
+	if file.PasswordHash != "" {
+		cookie, err := r.Cookie("unlocked_" + fileID)
+		if err != nil || cookie.Value != "true" {
+			http.Redirect(w, r, fmt.Sprintf("/view/%s?flash=Password+required+to+download&flash_type=error", fileID), http.StatusSeeOther)
+			return
+		}
+	}
+
+	// Atomic check and increment
+	allowed, _, err := s.store.IncrementAndCheckDownloadLimit(fileID)
+	if err != nil {
+		// Log detailed error for debugging, return generic message to user
+		log.Printf("[ERROR] Download limit check failed for file %s: %v", fileID, err)
+		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	if !allowed {
+		// Max reached, delete file and return error
+		s.store.DeleteFile(fileID)
+		renderError(w, http.StatusGone, "&#x1F4A8;", "Download Limit Reached",
+			"This file has reached its maximum download limit and has been deleted.",
+			"The uploader set a limit on how many times this file could be downloaded.")
+		return
+	}
+
+	// Set common headers
+	// Force download to prevent XSS
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", file.Filename))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// Downgrade dangerous content types to application/octet-stream
+	mimeType := file.MimeType
+	if validator.IsAllowedMimeType(mimeType) == false || strings.Contains(strings.ToLower(mimeType), "html") || strings.Contains(strings.ToLower(mimeType), "javascript") {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	// Check for Range header (resumable downloads)
+	rangeHeader := r.Header.Get("Range")
+	if rangeHeader != "" {
+		s.handleRangeDownload(w, r, file, rangeHeader)
+		return
+	}
+
+	// Track download stats (already handled in atomic increment)
+	// s.store.IncrementStat("total_downloads")
+	// s.store.IncrementFileDownloads(fileID)
+
+	// Full download
+	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+
+	if err := s.store.RetrieveFile(fileID, w); err != nil {
+		fmt.Printf("Error streaming file: %v\n", err)
+	}
+}
+
+// handleRangeDownload handles HTTP Range requests for partial/resumable downloads
+func (s *Server) handleRangeDownload(w http.ResponseWriter, _ *http.Request, file *models.File, rangeHeader string) {
+	// Parse Range header: "bytes=start-end" or "bytes=start-"
+	var start, end int64
+
+	// Simple range parsing (only supports single range)
+	_, err := fmt.Sscanf(rangeHeader, "bytes=%d-%d", &start, &end)
+	if err != nil {
+		// Try parsing "bytes=start-" format
+		_, err = fmt.Sscanf(rangeHeader, "bytes=%d-", &start)
+		if err != nil {
+			http.Error(w, "Invalid Range header", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		end = file.Size - 1
+	}
+
+	// Validate range
+	if start < 0 || start >= file.Size || end >= file.Size || start > end {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", file.Size))
+		http.Error(w, "Range not satisfiable", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	contentLength := end - start + 1
+
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, file.Size))
+	w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
+	w.WriteHeader(http.StatusPartialContent)
+
+	// Stream the partial content
+	if err := s.store.RetrieveFileRange(file.ID, w, start, end); err != nil {
+		fmt.Printf("Error streaming partial file: %v\n", err)
+	}
+}
+
+// FileManifest represents file metadata for resumable downloads
+type FileManifest struct {
+	FileID     string   `json:"file_id"`
+	Filename   string   `json:"filename"`
+	Size       int64    `json:"size"`
+	MimeType   string   `json:"mime_type"`
+	ChunkSize  int      `json:"chunk_size"`
+	ChunkCount int      `json:"chunk_count"`
+	Checksums  []string `json:"checksums"`
+}
+
+// handleManifest returns file metadata for resumable downloads
+func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+
+	file, err := s.store.GetFileMetadata(fileID)
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	if file.IsBlocked {
+		http.Error(w, "File not available", http.StatusForbidden)
+		return
+	}
+
+	// Get chunk info
+	chunks, err := s.store.GetChunks(fileID)
+	if err != nil {
+		http.Error(w, "Failed to get chunk info", http.StatusInternalServerError)
+		return
+	}
+
+	checksums := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		checksums[i] = chunk.Checksum
+	}
+
+	manifest := FileManifest{
+		FileID:     file.ID,
+		Filename:   file.Filename,
+		Size:       file.Size,
+		MimeType:   file.MimeType,
+		ChunkSize:  256 * 1024, // Current chunk size
+		ChunkCount: len(chunks),
+		Checksums:  checksums,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(manifest)
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+	token := chi.URLParam(r, "token")
+
+	// Verify token
+	meta, err := s.store.GetFileMetadata(fileID)
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	if meta.DeleteToken != token {
+		http.Error(w, "Invalid delete token", http.StatusForbidden)
+		return
+	}
+
+	if err := s.store.DeleteFile(fileID); err != nil {
+		http.Error(w, "Failed to delete", http.StatusInternalServerError)
+		return
+	}
+
+	renderMessage(w, http.StatusOK, "success", "File Deleted", "Your file has been permanently deleted.")
+}
+
+func (s *Server) adminAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If no password hash configured, deny access
+		if s.cfg.AdminPasswordHash == "" {
+			http.Error(w, "Admin access not configured. Set SSP_ADMIN_PASSWORD_HASH environment variable.", http.StatusForbidden)
+			return
+		}
+
+		username, password, ok := r.BasicAuth()
+		if !ok {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Admin Area"`)
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+
+		// Check username (default: admin)
+		if username != "admin" {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Admin Area"`)
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		// Check password against bcrypt hash
+		// Note: SSP_ADMIN_PASSWORD_HASH should be a bcrypt hash
+		// Generate with: htpasswd -nbBC 10 "" password | tr -d ':\n'
+		// Or use: go run -e 'import "golang.org/x/crypto/bcrypt"; h,_:=bcrypt.GenerateFromPassword([]byte("yourpassword"),10); println(string(h))'
+		if err := checkPasswordHash(s.cfg.AdminPasswordHash, password); err != nil {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Admin Area"`)
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkPasswordHash verifies a password against a bcrypt hash
+func checkPasswordHash(hash, password string) error {
+	if len(hash) > 0 && hash[0] == '$' {
+		// bcrypt hash
+		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	}
+	// Only bcrypt hashes are allowed - no plain text fallback
+	return fmt.Errorf("invalid password configuration: hash must be bcrypt format")
+}
+
+// AdminFileView represents a file with formatted fields for admin display
+type AdminFileView struct {
+	*models.File
+	SizeFormatted  string
+	EncryptionType string
+}
+
+func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	flash := r.URL.Query().Get("flash")
+	flashType := r.URL.Query().Get("flash_type")
+
+	// List recent files
+	files, _ := s.store.ListFiles(100) // Get top 100
+
+	// Create admin views with formatted fields
+	adminFiles := make([]AdminFileView, len(files))
+	for i, f := range files {
+		encType := "Legacy AES"
+		if f.EncryptionVersion == 2 {
+			encType = "Hybrid PQ"
+		}
+		adminFiles[i] = AdminFileView{
+			File:           f,
+			SizeFormatted:  formatSize(f.Size),
+			EncryptionType: encType,
+		}
+	}
+
+	// Get stats
+	stats, _ := s.store.GetStats()
+
+	// Get reports
+	reports, _ := s.store.ListReports("pending", 100)
+
+	// Get bans
+	bans, _ := s.store.ListBans(100)
+
+	data := map[string]interface{}{
+		"Files":         adminFiles,
+		"Stats":         stats,
+		"Reports":       reports,
+		"Bans":          bans,
+		"Flash":         flash,
+		"FlashType":     flashType,
+		"HasHybridKeys": s.cfg.HasHybridKeys(),
+		"KeyVersion":    s.cfg.KeyVersion,
+		"AdminURL":      s.cfg.AdminURL,
+		"CSRFToken":     mw.GetCSRFToken(r),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "admin.html", data)
+}
+
+func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+	s.store.DeleteFile(fileID)
+	http.Redirect(w, r, s.cfg.AdminURL, http.StatusSeeOther)
+}
+
+// handleReport handles content reports from users
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		FileID string `json:"file_id"`
+		Reason string `json:"reason"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.FileID == "" || req.Reason == "" {
+		http.Error(w, "file_id and reason are required", http.StatusBadRequest)
+		return
+	}
+
+	// Get reporter's I2P destination
+	reporterDest := i2p.GetDestinationFromRequest(r)
+
+	// Create report
+	reportID := uuid.New().String()
+	if err := s.store.CreateReport(reportID, req.FileID, reporterDest, req.Reason); err != nil {
+		http.Error(w, "Failed to create report", http.StatusInternalServerError)
+		return
+	}
+
+	// Send webhook notification
+	s.webhook.SendReport(reportID, req.FileID, req.Reason, reporterDest)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "success",
+		"report_id": reportID,
+	})
+}
+
+// handleAdminReports lists pending reports
+func (s *Server) handleAdminReports(w http.ResponseWriter, r *http.Request) {
+	reports, err := s.store.ListReports("pending", 100)
+	if err != nil {
+		http.Error(w, "Failed to list reports", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]interface{}{
+		"Reports":   reports,
+		"AdminURL":  s.cfg.AdminURL,
+		"CSRFToken": mw.GetCSRFToken(r),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "admin_reports.html", data)
+}
+
+// handleAdminReportAction handles admin actions on reports
+func (s *Server) handleAdminReportAction(w http.ResponseWriter, r *http.Request) {
+	reportID := chi.URLParam(r, "reportID")
+	action := r.FormValue("action") // "dismiss", "delete_file", "ban_hash", "ban_uploader"
+
+	switch action {
+	case "dismiss":
+		s.store.UpdateReportStatus(reportID, "dismissed", "Dismissed by admin")
+	case "delete_file":
+		report, err := s.store.GetReport(reportID)
+		if err == nil && report != nil {
+			s.store.DeleteFile(report.FileID)
+			s.store.UpdateReportStatus(reportID, "actioned", "File deleted")
+		}
+	case "ban_hash":
+		report, err := s.store.GetReport(reportID)
+		if err == nil && report != nil {
+			file, _ := s.store.GetFileMetadata(report.FileID)
+			if file != nil && file.ContentHash != "" {
+				s.store.CreateBan(uuid.New().String(), "file_hash", file.ContentHash, "Banned via report", nil)
+				s.store.DeleteFile(report.FileID)
+				s.store.UpdateReportStatus(reportID, "actioned", "Content hash banned and file deleted")
+			}
+		}
+	case "ban_uploader":
+		report, err := s.store.GetReport(reportID)
+		if err == nil && report != nil {
+			file, _ := s.store.GetFileMetadata(report.FileID)
+			if file != nil && file.UploaderDest != "" {
+				s.store.CreateBan(uuid.New().String(), "destination", file.UploaderDest, "Banned via report", nil)
+				s.store.UpdateReportStatus(reportID, "actioned", "Uploader banned")
+			}
+		}
+	}
+
+	http.Redirect(w, r, s.cfg.AdminURL+"/reports", http.StatusSeeOther)
+}
+
+// handleAdminBans lists active bans
+func (s *Server) handleAdminBans(w http.ResponseWriter, r *http.Request) {
+	bans, err := s.store.ListBans(100)
+	if err != nil {
+		http.Error(w, "Failed to list bans", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]interface{}{
+		"Bans":      bans,
+		"AdminURL":  s.cfg.AdminURL,
+		"CSRFToken": mw.GetCSRFToken(r),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "admin_bans.html", data)
+}
+
+// handleAdminCreateBan creates a new ban
+func (s *Server) handleAdminCreateBan(w http.ResponseWriter, r *http.Request) {
+	banType := r.FormValue("ban_type") // "destination" or "file_hash"
+	value := r.FormValue("value")      // The destination or hash to ban
+	reason := r.FormValue("reason")
+	expiresStr := r.FormValue("expires") // Duration string or empty for permanent
+
+	if banType == "" || value == "" {
+		http.Error(w, "ban_type and value are required", http.StatusBadRequest)
+		return
+	}
+
+	var expiresAt *time.Time
+	if expiresStr != "" {
+		if d, err := time.ParseDuration(expiresStr); err == nil {
+			t := time.Now().Add(d)
+			expiresAt = &t
+		}
+	}
+
+	banID := uuid.New().String()
+	if err := s.store.CreateBan(banID, banType, value, reason, expiresAt); err != nil {
+		http.Error(w, "Failed to create ban", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, s.cfg.AdminURL+"/bans", http.StatusSeeOther)
+}
+
+// handleAdminDeleteBan removes a ban
+func (s *Server) handleAdminDeleteBan(w http.ResponseWriter, r *http.Request) {
+	banID := chi.URLParam(r, "banID")
+	s.store.DeleteBan(banID)
+	http.Redirect(w, r, s.cfg.AdminURL+"/bans", http.StatusSeeOther)
+}
+
+// handleAdminBlock blocks a file from being accessed
+func (s *Server) handleAdminBlock(w http.ResponseWriter, r *http.Request) {
+	fileID := chi.URLParam(r, "fileID")
+	s.store.BlockFile(fileID)
+	http.Redirect(w, r, s.cfg.AdminURL, http.StatusSeeOther)
+}
+
+// handleAdminTools shows the admin tools page
+func (s *Server) handleAdminTools(w http.ResponseWriter, r *http.Request) {
+	flash := r.URL.Query().Get("flash")
+	flashType := r.URL.Query().Get("flash_type")
+
+	data := map[string]interface{}{
+		"Flash":         flash,
+		"FlashType":     flashType,
+		"HasHybridKeys": s.cfg.HasHybridKeys(),
+		"KeyVersion":    s.cfg.KeyVersion,
+		"AdminURL":      s.cfg.AdminURL,
+		"CSRFToken":     mw.GetCSRFToken(r),
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "admin_tools.html", data)
+}
+
+// handleAdminCleanup runs garbage collection manually
+func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		s.store.CleanupExpired()
+		s.store.CleanupExpiredPastes()
+		s.store.CleanupExpiredChunkedUploads()
+	}()
+	http.Redirect(w, r, s.cfg.AdminURL+"?flash=Cleanup+started&flash_type=success", http.StatusSeeOther)
+}
+
+// ========== Paste Handlers ==========
+
+// handleUploadPaste creates a new paste
+func (s *Server) handleUploadPaste(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form", http.StatusBadRequest)
+		return
+	}
+
+	content := r.FormValue("content")
+	if content == "" {
+		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+
+	language := r.FormValue("language")
+	if language == "" {
+		language = "text"
+	}
+
+	expiryStr := r.FormValue("expiry")
+	uploaderDest := i2p.GetDestinationFromRequest(r)
+
+	// Check if destination is banned
+	if uploaderDest != "" {
+		if banned, _ := s.store.IsDestinationBanned(uploaderDest); banned {
+			http.Error(w, "Upload not allowed", http.StatusForbidden)
+			return
+		}
+	}
+
+	// Parse expiry - max 30 days, no permanent option
+	// Default 1h for pastes if not specified
+	duration := 1 * time.Hour
+	if expiryStr != "" && expiryStr != "permanent" {
+		if d, err := time.ParseDuration(expiryStr); err == nil {
+			duration = d
+		}
+	}
+	// Cap at 30 days maximum
+	maxDuration := 30 * 24 * time.Hour
+	if duration > maxDuration {
+		duration = maxDuration
+	}
+	t := time.Now().Add(duration)
+	expiryTime := &t
+
+	pasteID := uuid.New().String()
+	deleteToken := uuid.New().String()
+
+	_, err := s.store.SavePaste(pasteID, []byte(content), language, expiryTime, deleteToken, uploaderDest)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save paste: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Set delete token in a session cookie (not in URL to prevent accidental sharing)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "paste_delete_" + pasteID,
+		Value:    deleteToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		// No Expires = session cookie (deleted when browser closes)
+	})
+
+	http.Redirect(w, r, fmt.Sprintf("/p/%s", pasteID), http.StatusSeeOther)
+}
+
+// handleViewPaste shows the paste view page
+func (s *Server) handleViewPaste(w http.ResponseWriter, r *http.Request) {
+	pasteID := chi.URLParam(r, "pasteID")
+
+	// Check for delete token in cookie (set after paste creation)
+	// The cookie is deleted after the first view so the delete link is only shown once
+	var deleteToken string
+	if cookie, err := r.Cookie("paste_delete_" + pasteID); err == nil {
+		deleteToken = cookie.Value
+		// Clear the cookie so the delete link is only shown on initial upload
+		http.SetCookie(w, &http.Cookie{
+			Name:     "paste_delete_" + pasteID,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1, // Delete the cookie
+			HttpOnly: true,
+		})
+	}
+
+	paste, err := s.store.GetPaste(pasteID)
+	if err != nil {
+		renderError(w, http.StatusNotFound, "&#x1F4DD;", "Paste Not Found",
+			"The paste you're looking for doesn't exist or has been deleted.",
+			"It may have expired or been removed by the creator.")
+		return
+	}
+
+	if paste.IsBlocked {
+		renderError(w, http.StatusForbidden, "&#x1F6AB;", "Paste Unavailable",
+			"This paste has been blocked and is no longer available.",
+			"It was removed for violating our terms of service.")
+		return
+	}
+
+	// Increment view count (only if not showing with token AND not a syntax change)
+	// Syntax changes via ?lang= should not count as a view (like Python version)
+	if deleteToken == "" && r.URL.Query().Get("lang") == "" {
+		s.store.IncrementPasteViewCount(pasteID)
+	}
+
+	// Check for language override via query parameter
+	displayLanguage := paste.Language
+	if langParam := r.URL.Query().Get("lang"); langParam != "" {
+		// Validate it's a supported language
+		validLanguages := map[string]bool{
+			"text": true, "bash": true, "c": true, "cpp": true, "css": true,
+			"go": true, "html": true, "java": true, "javascript": true, "json": true,
+			"python": true, "ruby": true, "rust": true, "sql": true, "typescript": true,
+			"xml": true, "yaml": true,
+		}
+		if validLanguages[langParam] {
+			displayLanguage = langParam
+		}
+	}
+
+	// Calculate time left
+	var timeLeft string
+	if paste.ExpiryTime != nil {
+		remaining := time.Until(*paste.ExpiryTime)
+		if remaining > 0 {
+			if remaining > 24*time.Hour {
+				timeLeft = fmt.Sprintf("~%d days", int(remaining.Hours()/24))
+			} else if remaining > time.Hour {
+				timeLeft = fmt.Sprintf("~%d hours", int(remaining.Hours()))
+			} else {
+				timeLeft = fmt.Sprintf("~%d minutes", int(remaining.Minutes()))
+			}
+		}
+	}
+
+	// Determine host
+	host := r.Host
+	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+		host = fh
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+
+	// Apply syntax highlighting server-side using Chroma
+	highlightedContent := highlightCode(string(paste.Content), displayLanguage)
+
+	data := map[string]interface{}{
+		"Paste":           paste,
+		"Content":         highlightedContent,
+		"TimeLeft":        timeLeft,
+		"DeleteToken":     deleteToken,
+		"Host":            scheme + "://" + host,
+		"DisplayLanguage": displayLanguage,
+		"Announcement":    s.announcement.Get(),
+		"CSRFToken":       mw.GetCSRFToken(r),
+		"Version":         s.version,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "view_paste.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// handleRawPaste returns the raw paste content
+func (s *Server) handleRawPaste(w http.ResponseWriter, r *http.Request) {
+	pasteID := chi.URLParam(r, "pasteID")
+
+	paste, err := s.store.GetPaste(pasteID)
+	if err != nil {
+		renderError(w, http.StatusNotFound, "&#x1F4DD;", "Paste Not Found",
+			"The paste you're looking for doesn't exist or has been deleted.",
+			"It may have expired or been removed by the creator.")
+		return
+	}
+
+	if paste.IsBlocked {
+		renderError(w, http.StatusForbidden, "&#x1F6AB;", "Paste Unavailable",
+			"This paste has been blocked and is no longer available.",
+			"It was removed for violating our terms of service.")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(paste.Content)
+}
+
+// handleDeletePaste deletes a paste with token verification
+func (s *Server) handleDeletePaste(w http.ResponseWriter, r *http.Request) {
+	pasteID := chi.URLParam(r, "pasteID")
+	token := chi.URLParam(r, "token")
+
+	paste, err := s.store.GetPaste(pasteID)
+	if err != nil {
+		http.Error(w, "Paste not found", http.StatusNotFound)
+		return
+	}
+
+	if paste.DeleteToken != token {
+		http.Error(w, "Invalid delete token", http.StatusForbidden)
+		return
+	}
+
+	if err := s.store.DeletePaste(pasteID); err != nil {
+		http.Error(w, "Failed to delete", http.StatusInternalServerError)
+		return
+	}
+
+	w.Write([]byte("Paste deleted successfully."))
+}
+
+// handleAPIUpload handles API file uploads (returns JSON)
+func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 55<<20)
+	if err := r.ParseMultipartForm(55 << 20); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		json.NewEncoder(w).Encode(map[string]string{"error": "File too large"})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "No file uploaded"})
+		return
+	}
+	defer file.Close()
+
+	uploaderDest := i2p.GetDestinationFromRequest(r)
+	mimeType := header.Header.Get("Content-Type")
+
+	if valid, reason := validator.ValidateFile(header.Filename, mimeType); !valid {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": reason})
+		return
+	}
+
+	// Sanitize filename
+	header.Filename = validator.SanitizeFilename(header.Filename)
+
+	expiryStr := r.FormValue("expiry")
+	// Parse expiry - max 30 days, no permanent option
+	// Default 24h if not specified
+	// Default 24h if not specified
+	duration := 24 * time.Hour
+	if expiryStr != "" && expiryStr != "permanent" {
+		d, err := time.ParseDuration(expiryStr)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid expiry duration " + expiryStr})
+			return
+		}
+		if d < 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Expiry duration cannot be negative"})
+			return
+		}
+		duration = d
+	}
+	// Cap at 30 days maximum
+	maxDuration := 30 * 24 * time.Hour
+	if duration > maxDuration {
+		duration = maxDuration
+	}
+	t := time.Now().Add(duration)
+	expiryTime := &t
+
+	// Parse upload options
+	keepMetadata := r.FormValue("keep_metadata") == "true" || r.FormValue("keep_metadata") == "1"
+	password := r.FormValue("password")
+	maxDownloadsStr := r.FormValue("max_downloads")
+
+	var passwordHash string
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to process password"})
+			return
+		}
+		passwordHash = string(hash)
+	}
+
+	var maxDownloads *int
+	if maxDownloadsStr != "" {
+		md, err := strconv.Atoi(maxDownloadsStr)
+		if err != nil || md <= 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid max_downloads (must be specific positive integer)"})
+			return
+		}
+		maxDownloads = &md
+	}
+
+	fileID := uuid.New().String()
+	deleteToken := uuid.New().String()
+
+	// Prepare upload options
+	opts := &storage.UploadOptions{
+		PasswordHash:     passwordHash,
+		MaxDownloads:     maxDownloads,
+		MetadataStripped: !keepMetadata,
+	}
+
+	// Read file data for scanning
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read file"})
+		return
+	}
+
+	// PhotoDNA check for images (before encryption/storage)
+	if s.photoDNA.ShouldCheck(mimeType) {
+		if blocked, _ := s.photoDNA.CheckImage(r.Context(), fileData); blocked {
+			s.store.IncrementStat("photodna_blocked")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Content not allowed"})
+			return
+		}
+	}
+
+	// ClamAV check for non-image files (before encryption/storage)
+	if s.clamAV.ShouldCheck(mimeType) {
+		if infected, threat, _ := s.clamAV.CheckFile(r.Context(), fileData); infected {
+			s.store.IncrementStat("clamav_blocked")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Malware detected: %s", threat)})
+			return
+		}
+	}
+
+	var fileReader io.Reader = bytes.NewReader(fileData)
+
+	savedFile, err := s.store.SaveFile(fileID, fileReader, header.Filename, mimeType, expiryTime, deleteToken, uploaderDest, opts)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save file"})
+		return
+	}
+
+	// Track API upload stats
+	s.store.IncrementStat("total_api_uploads")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":           savedFile.ID,
+		"url":          fmt.Sprintf("/f/%s", savedFile.ID),
+		"delete_url":   fmt.Sprintf("/d/%s/%s", savedFile.ID, deleteToken),
+		"delete_token": deleteToken,
+		"size":         savedFile.Size,
+		"filename":     savedFile.Filename,
+	})
+}
+
+// handleAPIPaste handles API paste creation (returns JSON)
+func (s *Server) handleAPIPaste(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content  string `json:"content"`
+		Language string `json:"language"`
+		Expiry   string `json:"expiry"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
+		return
+	}
+
+	if req.Content == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Content is required"})
+		return
+	}
+
+	language := req.Language
+	if language == "" {
+		language = "text"
+	}
+
+	uploaderDest := i2p.GetDestinationFromRequest(r)
+
+	// Parse expiry - max 30 days, no permanent option
+	// Default 1h for pastes if not specified
+	duration := 1 * time.Hour
+	if req.Expiry != "" && req.Expiry != "permanent" {
+		if d, err := time.ParseDuration(req.Expiry); err == nil {
+			duration = d
+		}
+	}
+	// Cap at 30 days maximum
+	maxDuration := 30 * 24 * time.Hour
+	if duration > maxDuration {
+		duration = maxDuration
+	}
+	t := time.Now().Add(duration)
+	expiryTime := &t
+
+	pasteID := uuid.New().String()
+	deleteToken := uuid.New().String()
+
+	_, err := s.store.SavePaste(pasteID, []byte(req.Content), language, expiryTime, deleteToken, uploaderDest)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save paste"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":           pasteID,
+		"url":          fmt.Sprintf("/p/%s", pasteID),
+		"raw_url":      fmt.Sprintf("/p/%s/raw", pasteID),
+		"delete_url":   fmt.Sprintf("/pd/%s/%s", pasteID, deleteToken),
+		"delete_token": deleteToken,
+	})
+}
+
+// handleDonate shows the donation page
+func (s *Server) handleDonate(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"Announcement": s.announcement.Get(),
+		"Version":      s.version,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "donate.html", data)
+}
+
+// handleReportPage shows the public report page
+func (s *Server) handleReportPage(w http.ResponseWriter, r *http.Request) {
+	flash := r.URL.Query().Get("flash")
+	flashType := r.URL.Query().Get("flash_type")
+
+	data := map[string]interface{}{
+		"Flash":        flash,
+		"FlashType":    flashType,
+		"Announcement": s.announcement.Get(),
+		"CSRFToken":    mw.GetCSRFToken(r),
+		"Version":      s.version,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "report.html", data)
+}
+
+// handleReportSubmit handles form submission from the public report page
+func (s *Server) handleReportSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/report?flash=Invalid+form&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	fileURL := r.FormValue("file_url")
+	reason := r.FormValue("reason")
+
+	if fileURL == "" || reason == "" {
+		http.Redirect(w, r, "/report?flash=URL+and+reason+are+required&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	// Check rate limiting
+	reporterDest := i2p.GetDestinationFromRequest(r)
+	if !s.rateLimiter.AllowReport(reporterDest) {
+		http.Redirect(w, r, "/report?flash=Too+many+reports.+Please+try+again+later.&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	// Parse file ID from URL
+	// URL formats: /f/UUID, /view/UUID, /p/UUID, http://host/f/UUID, etc.
+	fileID := extractFileIDFromURL(fileURL)
+	if fileID == "" {
+		http.Redirect(w, r, "/report?flash=Invalid+file+URL.+Please+provide+a+valid+file+link.&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	// Verify file, paste, or collection exists
+	_, err := s.store.GetFileMetadata(fileID)
+	if err != nil {
+		// Also check if it's a paste
+		_, pasteErr := s.store.GetPaste(fileID)
+		if pasteErr != nil {
+			// Also check if it's a collection
+			_, collectionErr := s.store.GetCollection(fileID)
+			if collectionErr != nil {
+				http.Redirect(w, r, "/report?flash=File+not+found.+It+may+have+been+deleted+or+expired.&flash_type=error", http.StatusSeeOther)
+				return
+			}
+		}
+	}
+
+	// Create report
+	reportID := uuid.New().String()
+	if err := s.store.CreateReport(reportID, fileID, reporterDest, reason); err != nil {
+		http.Redirect(w, r, "/report?flash=Failed+to+submit+report.+Please+try+again.&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	// Send webhook notification
+	s.webhook.SendReport(reportID, fileID, reason, reporterDest)
+
+	http.Redirect(w, r, "/report?flash=Report+submitted+successfully.+Thank+you.&flash_type=success", http.StatusSeeOther)
+}
+
+// extractFileIDFromURL parses a file ID from various URL formats
+func extractFileIDFromURL(fileURL string) string {
+	// Try to parse as URL first
+	parsed, err := url.Parse(fileURL)
+	if err == nil && parsed.Path != "" {
+		// Extract path: /f/UUID, /view/UUID, /p/UUID, or /c/UUID
+		path := parsed.Path
+		if strings.HasPrefix(path, "/f/") {
+			return strings.TrimPrefix(path, "/f/")
+		}
+		if strings.HasPrefix(path, "/view/") {
+			return strings.TrimPrefix(path, "/view/")
+		}
+		if strings.HasPrefix(path, "/p/") {
+			return strings.TrimPrefix(path, "/p/")
+		}
+		if strings.HasPrefix(path, "/c/") {
+			return strings.TrimPrefix(path, "/c/")
+		}
+	}
+
+	// Try direct patterns in the input string
+	if strings.Contains(fileURL, "/f/") {
+		parts := strings.Split(fileURL, "/f/")
+		if len(parts) >= 2 {
+			// Get the ID part, trimming any query params or path suffix
+			id := parts[len(parts)-1]
+			if idx := strings.Index(id, "?"); idx != -1 {
+				id = id[:idx]
+			}
+			if idx := strings.Index(id, "/"); idx != -1 {
+				id = id[:idx]
+			}
+			return strings.TrimSpace(id)
+		}
+	}
+
+	if strings.Contains(fileURL, "/view/") {
+		parts := strings.Split(fileURL, "/view/")
+		if len(parts) >= 2 {
+			id := parts[len(parts)-1]
+			if idx := strings.Index(id, "?"); idx != -1 {
+				id = id[:idx]
+			}
+			if idx := strings.Index(id, "/"); idx != -1 {
+				id = id[:idx]
+			}
+			return strings.TrimSpace(id)
+		}
+	}
+
+	if strings.Contains(fileURL, "/p/") {
+		parts := strings.Split(fileURL, "/p/")
+		if len(parts) >= 2 {
+			id := parts[len(parts)-1]
+			if idx := strings.Index(id, "?"); idx != -1 {
+				id = id[:idx]
+			}
+			if idx := strings.Index(id, "/"); idx != -1 {
+				id = id[:idx]
+			}
+			return strings.TrimSpace(id)
+		}
+	}
+
+	if strings.Contains(fileURL, "/c/") {
+		parts := strings.Split(fileURL, "/c/")
+		if len(parts) >= 2 {
+			id := parts[len(parts)-1]
+			if idx := strings.Index(id, "?"); idx != -1 {
+				id = id[:idx]
+			}
+			if idx := strings.Index(id, "/"); idx != -1 {
+				id = id[:idx]
+			}
+			return strings.TrimSpace(id)
+		}
+	}
+
+	// If input looks like a UUID directly, return it
+	if len(fileURL) == 36 && strings.Count(fileURL, "-") == 4 {
+		return fileURL
+	}
+
+	return ""
+}
+
+// ========== Chunked Upload Handlers ==========
+
+// handleChunkedInit initializes a chunked upload session
+func (s *Server) handleChunkedInit(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Filename     string `json:"filename"`
+		MimeType     string `json:"mime_type"`
+		TotalSize    int64  `json:"total_size"`
+		TotalChunks  int    `json:"total_chunks"`
+		Expiry       string `json:"expiry"`
+		Password     string `json:"password"`
+		MaxDownloads *int   `json:"max_downloads"`
+		KeepMetadata bool   `json:"keep_metadata"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
+		return
+	}
+
+	if req.Filename == "" || req.TotalSize <= 0 || req.TotalChunks <= 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "filename, total_size, and total_chunks are required"})
+		return
+	}
+
+	// Sanitize filename
+	req.Filename = validator.SanitizeFilename(req.Filename)
+
+	// Check if destination is banned
+	uploaderDest := i2p.GetDestinationFromRequest(r)
+	if uploaderDest != "" {
+		if banned, _ := s.store.IsDestinationBanned(uploaderDest); banned {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Upload not allowed"})
+			return
+		}
+	}
+
+	// Hash password if provided
+	var passwordHash string
+	if req.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to process password"})
+			return
+		}
+		passwordHash = string(hash)
+	}
+
+	uploadID := uuid.New().String()
+	upload, err := s.store.InitChunkedUpload(uploadID, req.Filename, req.MimeType, req.TotalSize, req.TotalChunks, req.Expiry, uploaderDest, passwordHash, req.MaxDownloads, req.KeepMetadata)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to initialize upload"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"upload_id":    upload.ID,
+		"chunk_size":   upload.ChunkSize,
+		"total_chunks": upload.TotalChunks,
+		"expires_at":   upload.ExpiresAt,
+	})
+}
+
+// handleChunkedUpload receives an individual chunk
+func (s *Server) handleChunkedUpload(w http.ResponseWriter, r *http.Request) {
+	uploadID := chi.URLParam(r, "uploadID")
+	chunkIndexStr := chi.URLParam(r, "chunkIndex")
+
+	chunkIndex, err := strconv.Atoi(chunkIndexStr)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid chunk index"})
+		return
+	}
+
+	// Verify upload session exists
+	upload, err := s.store.GetChunkedUpload(uploadID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Upload session not found"})
+		return
+	}
+
+	// Validate chunk index
+	if chunkIndex < 0 || chunkIndex >= upload.TotalChunks {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Chunk index out of range"})
+		return
+	}
+
+	// Limit chunk size (3MB max to allow for overhead)
+	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
+
+	// Read chunk data
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read chunk data"})
+		return
+	}
+
+	// Save chunk
+	if err := s.store.SaveUploadChunk(uploadID, chunkIndex, data); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save chunk"})
+		return
+	}
+
+	// Get updated status
+	upload, _ = s.store.GetChunkedUpload(uploadID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"chunk_index":     chunkIndex,
+		"received_chunks": upload.ReceivedChunks,
+		"total_chunks":    upload.TotalChunks,
+		"complete":        upload.ReceivedChunks == upload.TotalChunks,
+	})
+}
+
+// handleChunkedComplete finalizes a chunked upload
+func (s *Server) handleChunkedComplete(w http.ResponseWriter, r *http.Request) {
+	uploadID := chi.URLParam(r, "uploadID")
+
+	file, deleteToken, err := s.store.CompleteChunkedUpload(uploadID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":           file.ID,
+		"url":          fmt.Sprintf("/f/%s", file.ID),
+		"view_url":     fmt.Sprintf("/view/%s", file.ID),
+		"delete_url":   fmt.Sprintf("/d/%s/%s", file.ID, deleteToken),
+		"delete_token": deleteToken,
+		"size":         file.Size,
+		"filename":     file.Filename,
+	})
+}
+
+// handleChunkedStatus returns the status of a chunked upload
+func (s *Server) handleChunkedStatus(w http.ResponseWriter, r *http.Request) {
+	uploadID := chi.URLParam(r, "uploadID")
+
+	upload, err := s.store.GetChunkedUpload(uploadID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Upload session not found"})
+		return
+	}
+
+	// Get received chunk indices
+	chunks, _ := s.store.GetUploadChunks(uploadID)
+	receivedIndices := make([]int, len(chunks))
+	for i, c := range chunks {
+		receivedIndices[i] = c.ChunkIndex
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"upload_id":        upload.ID,
+		"filename":         upload.Filename,
+		"total_size":       upload.TotalSize,
+		"total_chunks":     upload.TotalChunks,
+		"received_chunks":  upload.ReceivedChunks,
+		"received_indices": receivedIndices,
+		"complete":         upload.ReceivedChunks == upload.TotalChunks,
+		"expires_at":       upload.ExpiresAt,
+	})
+}
+
+// handleAdminAnalytics displays the analytics dashboard
+func (s *Server) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
+	// Get current stats
+	stats, _ := s.store.GetStats()
+
+	// Get stats history (last 30 days)
+	history, _ := s.store.GetStatsHistory(30)
+
+	// Get file type distribution
+	fileTypes, _ := s.store.GetFileTypeDistribution()
+
+	// Get current storage in bytes for display
+	currentBytes := s.store.GetTotalBytesStored()
+
+	data := map[string]interface{}{
+		"Stats":        stats,
+		"History":      history,
+		"FileTypes":    fileTypes,
+		"CurrentBytes": currentBytes,
+		"AdminURL":     s.cfg.AdminURL,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "admin_analytics.html", data)
+}
+
+// ========== Collection Handlers ==========
+
+// handleViewCollection displays a collection page
+func (s *Server) handleViewCollection(w http.ResponseWriter, r *http.Request) {
+	collectionID := chi.URLParam(r, "collectionID")
+
+	collection, err := s.store.GetCollection(collectionID)
+	if err != nil {
+		http.Error(w, "Collection not found", http.StatusNotFound)
+		return
+	}
+
+	if collection.IsBlocked {
+		http.Error(w, "This collection has been blocked", http.StatusGone)
+		return
+	}
+
+	// Check expiry
+	if collection.ExpiryTime != nil && collection.ExpiryTime.Before(time.Now()) {
+		http.Error(w, "This collection has expired", http.StatusGone)
+		return
+	}
+
+	// Check if password protected and not unlocked
+	if collection.PasswordHash != "" {
+		// Check session cookie for unlock
+		cookie, err := r.Cookie("collection_unlock_" + collectionID)
+		if err != nil || cookie.Value != "unlocked" {
+			// Show password form
+			data := map[string]interface{}{
+				"Collection":    collection,
+				"NeedsPassword": true,
+				"Flash":         r.URL.Query().Get("flash"),
+				"FlashType":     r.URL.Query().Get("flash_type"),
+				"Announcement":  s.announcement.Get(),
+				"CSRFToken":     mw.GetCSRFToken(r),
+				"Version":       s.version,
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			templates.ExecuteTemplate(w, "view_collection.html", data)
+			return
+		}
+	}
+
+	// Get files in collection
+	files, err := s.store.GetCollectionFiles(collectionID)
+	if err != nil {
+		files = []*models.File{}
+	}
+
+	// Increment view count
+	s.store.IncrementCollectionViews(collectionID)
+
+	// Calculate total size
+	var totalSize int64
+	for _, f := range files {
+		totalSize += f.Size
+	}
+
+	// Build host URL
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+
+	data := map[string]interface{}{
+		"Collection":    collection,
+		"Files":         files,
+		"FileCount":     len(files),
+		"TotalSize":     totalSize,
+		"NeedsPassword": false,
+		"Flash":         r.URL.Query().Get("flash"),
+		"FlashType":     r.URL.Query().Get("flash_type"),
+		"DeleteToken":   r.URL.Query().Get("token"),
+		"Host":          scheme + "://" + host,
+		"Announcement":  s.announcement.Get(),
+		"CSRFToken":     mw.GetCSRFToken(r),
+		"Version":       s.version,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	templates.ExecuteTemplate(w, "view_collection.html", data)
+}
+
+// handleUnlockCollection handles password unlock for collections
+func (s *Server) handleUnlockCollection(w http.ResponseWriter, r *http.Request) {
+	collectionID := chi.URLParam(r, "collectionID")
+
+	collection, err := s.store.GetCollection(collectionID)
+	if err != nil {
+		http.Error(w, "Collection not found", http.StatusNotFound)
+		return
+	}
+
+	password := r.FormValue("password")
+	if password == "" {
+		http.Redirect(w, r, "/c/"+collectionID+"?flash=Password+required&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(collection.PasswordHash), []byte(password)); err != nil {
+		http.Redirect(w, r, "/c/"+collectionID+"?flash=Invalid+password&flash_type=error", http.StatusSeeOther)
+		return
+	}
+
+	// Set unlock cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "collection_unlock_" + collectionID,
+		Value:    "unlocked",
+		Path:     "/",
+		MaxAge:   86400, // 24 hours
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	http.Redirect(w, r, "/c/"+collectionID, http.StatusSeeOther)
+}
+
+// handleDeleteCollection handles collection deletion via token
+func (s *Server) handleDeleteCollection(w http.ResponseWriter, r *http.Request) {
+	collectionID := chi.URLParam(r, "collectionID")
+	token := chi.URLParam(r, "token")
+
+	collection, err := s.store.GetCollection(collectionID)
+	if err != nil {
+		http.Error(w, "Collection not found", http.StatusNotFound)
+		return
+	}
+
+	if collection.DeleteToken != token {
+		http.Error(w, "Invalid delete token", http.StatusForbidden)
+		return
+	}
+
+	if err := s.store.DeleteCollection(collectionID); err != nil {
+		http.Error(w, "Failed to delete collection", http.StatusInternalServerError)
+		return
+	}
+
+	// Redirect to home with success message
+	http.Redirect(w, r, "/?flash=Collection+deleted+successfully&flash_type=success", http.StatusSeeOther)
+}
+
+// handleAPICreateCollection creates a new collection via API
+func (s *Server) handleAPICreateCollection(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		FileIDs     []string `json:"file_ids"`
+		Password    string   `json:"password"`
+		Expiry      string   `json:"expiry"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Auto-generate title if not provided
+	if req.Title == "" {
+		req.Title = fmt.Sprintf("Collection - %s", time.Now().Format("Jan 02, 2006"))
+	}
+
+	if len(req.FileIDs) == 0 {
+		http.Error(w, "At least one file_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.FileIDs) > 50 {
+		http.Error(w, "Maximum 50 files per collection", http.StatusBadRequest)
+		return
+	}
+
+	// Verify all files exist
+	for _, fileID := range req.FileIDs {
+		if _, err := s.store.GetFileMetadata(fileID); err != nil {
+			http.Error(w, "File not found: "+fileID, http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Generate IDs
+	collectionID := uuid.New().String()
+	deleteToken := uuid.New().String()
+
+	// Hash password if provided
+	var passwordHash string
+	if req.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "Failed to process password", http.StatusInternalServerError)
+			return
+		}
+		passwordHash = string(hash)
+	}
+
+	// Parse expiry
+	var expiryTime *time.Time
+	if req.Expiry != "" {
+		duration, err := time.ParseDuration(req.Expiry)
+		if err != nil {
+			http.Error(w, "Invalid expiry format", http.StatusBadRequest)
+			return
+		}
+		t := time.Now().Add(duration)
+		expiryTime = &t
+	}
+
+	// Get uploader destination
+	uploaderDest := i2p.GetDestinationFromRequest(r)
+
+	// Create collection
+	collection := &models.Collection{
+		ID:           collectionID,
+		Title:        req.Title,
+		Description:  req.Description,
+		UploaderDest: uploaderDest,
+		DeleteToken:  deleteToken,
+		PasswordHash: passwordHash,
+		ExpiryTime:   expiryTime,
+	}
+
+	if err := s.store.CreateCollection(collection); err != nil {
+		http.Error(w, "Failed to create collection", http.StatusInternalServerError)
+		return
+	}
+
+	// Add files to collection
+	if err := s.store.AddFilesToCollection(collectionID, req.FileIDs); err != nil {
+		// Cleanup on failure
+		s.store.DeleteCollection(collectionID)
+		http.Error(w, "Failed to add files to collection", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":           collectionID,
+		"url":          "/c/" + collectionID,
+		"delete_token": deleteToken,
+		"delete_url":   "/cd/" + collectionID + "/" + deleteToken,
+	})
+}
