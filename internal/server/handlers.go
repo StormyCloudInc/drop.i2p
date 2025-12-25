@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"drop-i2p/internal/i2p"
+	mw "drop-i2p/internal/middleware"
 	"drop-i2p/internal/models"
 	"drop-i2p/internal/storage"
 	"drop-i2p/internal/validator"
@@ -148,6 +150,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"Stats":        stats,
 		"Host":         r.Host,
 		"Announcement": s.announcement.Get(),
+		"CSRFToken":    mw.GetCSRFToken(r),
+		"Version":      s.version,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -351,20 +355,26 @@ func (s *Server) handleViewFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Determine if it's an image
+	// Determine file type for preview
 	isImage := false
 	fileType := "file"
-	switch file.MimeType {
-	case "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml":
+	mimeType := file.MimeType
+
+	// Use prefix matching for broader compatibility
+	switch {
+	case mimeType == "image/jpeg" || mimeType == "image/png" || mimeType == "image/gif" ||
+		mimeType == "image/webp" || mimeType == "image/svg+xml" || mimeType == "image/bmp":
 		isImage = true
 		fileType = "image"
-	case "application/pdf":
+	case mimeType == "application/pdf":
 		fileType = "pdf"
-	case "application/zip", "application/x-tar", "application/gzip", "application/x-7z-compressed":
+	case mimeType == "application/zip" || mimeType == "application/x-tar" ||
+		mimeType == "application/gzip" || mimeType == "application/x-7z-compressed" ||
+		mimeType == "application/x-rar-compressed" || mimeType == "application/x-bzip2":
 		fileType = "archive"
-	case "video/mp4", "video/webm", "video/ogg":
+	case strings.HasPrefix(mimeType, "video/"):
 		fileType = "video"
-	case "audio/mpeg", "audio/ogg", "audio/wav":
+	case strings.HasPrefix(mimeType, "audio/"):
 		fileType = "audio"
 	}
 
@@ -413,6 +423,8 @@ func (s *Server) handleViewFile(w http.ResponseWriter, r *http.Request) {
 		"Flash":               flash,
 		"FlashType":           flashType,
 		"Announcement":        s.announcement.Get(),
+		"CSRFToken":           mw.GetCSRFToken(r),
+		"Version":             s.version,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -513,8 +525,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// Atomic check and increment
 	allowed, _, err := s.store.IncrementAndCheckDownloadLimit(fileID)
 	if err != nil {
-		fmt.Printf("Error checking download limit: %v\n", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		// Log detailed error for debugging, return generic message to user
+		log.Printf("[ERROR] Download limit check failed for file %s: %v", fileID, err)
+		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -713,11 +726,8 @@ func checkPasswordHash(hash, password string) error {
 		// bcrypt hash
 		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	}
-	// Plain text comparison (for development only - not recommended)
-	if hash == password {
-		return nil
-	}
-	return fmt.Errorf("invalid password")
+	// Only bcrypt hashes are allowed - no plain text fallback
+	return fmt.Errorf("invalid password configuration: hash must be bcrypt format")
 }
 
 // AdminFileView represents a file with formatted fields for admin display
@@ -767,6 +777,7 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		"HasHybridKeys": s.cfg.HasHybridKeys(),
 		"KeyVersion":    s.cfg.KeyVersion,
 		"AdminURL":      s.cfg.AdminURL,
+		"CSRFToken":     mw.GetCSRFToken(r),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "admin.html", data)
@@ -824,8 +835,9 @@ func (s *Server) handleAdminReports(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"Reports":  reports,
-		"AdminURL": s.cfg.AdminURL,
+		"Reports":   reports,
+		"AdminURL":  s.cfg.AdminURL,
+		"CSRFToken": mw.GetCSRFToken(r),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "admin_reports.html", data)
@@ -878,8 +890,9 @@ func (s *Server) handleAdminBans(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"Bans":     bans,
-		"AdminURL": s.cfg.AdminURL,
+		"Bans":      bans,
+		"AdminURL":  s.cfg.AdminURL,
+		"CSRFToken": mw.GetCSRFToken(r),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "admin_bans.html", data)
@@ -939,6 +952,7 @@ func (s *Server) handleAdminTools(w http.ResponseWriter, r *http.Request) {
 		"HasHybridKeys": s.cfg.HasHybridKeys(),
 		"KeyVersion":    s.cfg.KeyVersion,
 		"AdminURL":      s.cfg.AdminURL,
+		"CSRFToken":     mw.GetCSRFToken(r),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "admin_tools.html", data)
@@ -1114,6 +1128,8 @@ func (s *Server) handleViewPaste(w http.ResponseWriter, r *http.Request) {
 		"Host":            scheme + "://" + host,
 		"DisplayLanguage": displayLanguage,
 		"Announcement":    s.announcement.Get(),
+		"CSRFToken":       mw.GetCSRFToken(r),
+		"Version":         s.version,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1394,6 +1410,7 @@ func (s *Server) handleAPIPaste(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDonate(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"Announcement": s.announcement.Get(),
+		"Version":      s.version,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "donate.html", data)
@@ -1408,6 +1425,8 @@ func (s *Server) handleReportPage(w http.ResponseWriter, r *http.Request) {
 		"Flash":        flash,
 		"FlashType":    flashType,
 		"Announcement": s.announcement.Get(),
+		"CSRFToken":    mw.GetCSRFToken(r),
+		"Version":      s.version,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	templates.ExecuteTemplate(w, "report.html", data)
@@ -1443,14 +1462,18 @@ func (s *Server) handleReportSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify file or paste exists
+	// Verify file, paste, or collection exists
 	_, err := s.store.GetFileMetadata(fileID)
 	if err != nil {
 		// Also check if it's a paste
 		_, pasteErr := s.store.GetPaste(fileID)
 		if pasteErr != nil {
-			http.Redirect(w, r, "/report?flash=File+not+found.+It+may+have+been+deleted+or+expired.&flash_type=error", http.StatusSeeOther)
-			return
+			// Also check if it's a collection
+			_, collectionErr := s.store.GetCollection(fileID)
+			if collectionErr != nil {
+				http.Redirect(w, r, "/report?flash=File+not+found.+It+may+have+been+deleted+or+expired.&flash_type=error", http.StatusSeeOther)
+				return
+			}
 		}
 	}
 
@@ -1472,7 +1495,7 @@ func extractFileIDFromURL(fileURL string) string {
 	// Try to parse as URL first
 	parsed, err := url.Parse(fileURL)
 	if err == nil && parsed.Path != "" {
-		// Extract path: /f/UUID, /view/UUID, or /p/UUID
+		// Extract path: /f/UUID, /view/UUID, /p/UUID, or /c/UUID
 		path := parsed.Path
 		if strings.HasPrefix(path, "/f/") {
 			return strings.TrimPrefix(path, "/f/")
@@ -1482,6 +1505,9 @@ func extractFileIDFromURL(fileURL string) string {
 		}
 		if strings.HasPrefix(path, "/p/") {
 			return strings.TrimPrefix(path, "/p/")
+		}
+		if strings.HasPrefix(path, "/c/") {
+			return strings.TrimPrefix(path, "/c/")
 		}
 	}
 
@@ -1517,6 +1543,20 @@ func extractFileIDFromURL(fileURL string) string {
 
 	if strings.Contains(fileURL, "/p/") {
 		parts := strings.Split(fileURL, "/p/")
+		if len(parts) >= 2 {
+			id := parts[len(parts)-1]
+			if idx := strings.Index(id, "?"); idx != -1 {
+				id = id[:idx]
+			}
+			if idx := strings.Index(id, "/"); idx != -1 {
+				id = id[:idx]
+			}
+			return strings.TrimSpace(id)
+		}
+	}
+
+	if strings.Contains(fileURL, "/c/") {
+		parts := strings.Split(fileURL, "/c/")
 		if len(parts) >= 2 {
 			id := parts[len(parts)-1]
 			if idx := strings.Index(id, "?"); idx != -1 {
@@ -1737,9 +1777,6 @@ func (s *Server) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
 	// Get stats history (last 30 days)
 	history, _ := s.store.GetStatsHistory(30)
 
-	// Get top uploaders
-	topUploaders, _ := s.store.GetTopUploaders(10)
-
 	// Get file type distribution
 	fileTypes, _ := s.store.GetFileTypeDistribution()
 
@@ -1749,7 +1786,6 @@ func (s *Server) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"Stats":        stats,
 		"History":      history,
-		"TopUploaders": topUploaders,
 		"FileTypes":    fileTypes,
 		"CurrentBytes": currentBytes,
 		"AdminURL":     s.cfg.AdminURL,
@@ -1794,6 +1830,8 @@ func (s *Server) handleViewCollection(w http.ResponseWriter, r *http.Request) {
 				"Flash":         r.URL.Query().Get("flash"),
 				"FlashType":     r.URL.Query().Get("flash_type"),
 				"Announcement":  s.announcement.Get(),
+				"CSRFToken":     mw.GetCSRFToken(r),
+				"Version":       s.version,
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			templates.ExecuteTemplate(w, "view_collection.html", data)
@@ -1834,6 +1872,8 @@ func (s *Server) handleViewCollection(w http.ResponseWriter, r *http.Request) {
 		"DeleteToken":   r.URL.Query().Get("token"),
 		"Host":          scheme + "://" + host,
 		"Announcement":  s.announcement.Get(),
+		"CSRFToken":     mw.GetCSRFToken(r),
+		"Version":       s.version,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

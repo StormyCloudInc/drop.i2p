@@ -1,99 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Report Content - I2P Secure Share</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report Content - I2P Secure Share</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 </head>
-
 <body>
-
-    {{if .Announcement}}
-    <div
-        style="background: rgba(56, 189, 248, 0.1); border-bottom: 1px solid rgba(56, 189, 248, 0.2); padding: 0.75rem; text-align: center; color: var(--text-main);">
-        <strong>Notice:</strong> {{.Announcement}}
-    </div>
-    {{end}}
-
-    <div class="main-wrapper">
-        <div class="app-container" style="max-width: 600px;">
-
-            <header class="header-section">
-                <a href="/" style="display: inline-block; margin-bottom: 1.5rem;">
-                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 79px;">
-                </a>
-                <h1>Report Content</h1>
-                <p style="color: var(--text-muted);">Report files that violate our terms of service</p>
-            </header>
-
-            <main>
-                {{if .Flash}}
-                <div class="alert alert-{{.FlashType}}">
-                    {{.Flash}}
-                </div>
-                {{end}}
-
-                <div class="glass-panel" style="padding: 2rem;">
-                    <form id="report-form" method="POST" action="/report">
-                        <div style="margin-bottom: 1.5rem;">
-                            <label for="file_url">File URL</label>
-                            <input type="text" id="file_url" name="file_url"
-                                placeholder="e.g., http://example.i2p/f/abc123..." required>
-                            <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem;">Paste the full
-                                URL to the file you want to report</p>
-                        </div>
-
-                        <div style="margin-bottom: 1.5rem;">
-                            <label for="reason">Reason for Report</label>
-                            <div class="select-wrapper">
-                                <select id="reason" name="reason" required>
-                                    <option value="">Select a reason...</option>
-                                    <option value="illegal">Illegal content</option>
-                                    <option value="malware">Malware/Virus</option>
-                                    <option value="spam">Spam</option>
-                                    <option value="other">Other</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div style="margin-bottom: 2rem;">
-                            <label for="details">Additional Details (optional)</label>
-                            <textarea id="details" name="details" rows="3"
-                                placeholder="Provide any additional information..."></textarea>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary w-full">Submit Report</button>
-                    </form>
-                </div>
-
-                <div class="glass-panel"
-                    style="padding: 1.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color);">
-                    <h3 style="margin-bottom: 1rem; font-size: 1rem; color: var(--text-main);">What happens next?</h3>
-                    <ul style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem; line-height: 1.6;">
-                        <li>Reports are reviewed by our moderation team</li>
-                        <li>Violating content will be removed</li>
-                        <li>Repeat offenders may be banned</li>
-                    </ul>
-                </div>
-
-                <div class="text-center mt-8">
-                    <a href="/" style="color: var(--primary);">Back to Home</a>
-                </div>
-            </main>
-
-            <footer>
-                <div class="text-center">
-                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
-                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
-                    <a href="/donate">Donate</a>
-                </div>
-            </footer>
-        </div>
-    </div>
-
+{{if .Announcement}}<div style="background:rgba(56,189,248,0.1);border-bottom:1px solid rgba(56,189,248,0.2);padding:0.75rem;text-align:center;color:var(--text-main)"><strong>Notice:</strong> {{.Announcement}}</div>{{end}}
+<div class="main-wrapper"><div class="app-container" style="max-width:600px">
+<header class="header-section">
+<a href="/" style="display:inline-block;margin-bottom:1.5rem"><img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height:79px"></a>
+<h1>Report Content</h1>
+<p style="color:var(--text-muted)">Report files that violate our terms of service</p>
+</header>
+<main>
+{{if .Flash}}<div class="alert alert-{{.FlashType}}">{{.Flash}}</div>{{end}}
+<div class="glass-panel" style="padding:2rem">
+<form id="report-form" method="POST" action="/report">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<div style="margin-bottom:1.5rem"><label for="file_url">File URL</label>
+<input type="text" id="file_url" name="file_url" placeholder="e.g., http://example.i2p/f/abc123..." required>
+<p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem">Paste the full URL to the file you want to report</p></div>
+<div style="margin-bottom:1.5rem"><label for="reason">Reason for Report</label>
+<div class="select-wrapper"><select id="reason" name="reason" required><option value="">Select a reason...</option><option value="illegal">Illegal content</option><option value="malware">Malware/Virus</option><option value="spam">Spam</option><option value="other">Other</option></select></div></div>
+<div style="margin-bottom:2rem"><label for="details">Additional Details (optional)</label>
+<textarea id="details" name="details" rows="3" placeholder="Provide any additional information..."></textarea></div>
+<button type="submit" class="btn btn-primary w-full">Submit Report</button>
+</form>
+</div>
+<div class="glass-panel" style="padding:1.5rem;background:rgba(0,0,0,0.2);border:1px solid var(--border-color)">
+<h3 style="margin-bottom:1rem;font-size:1rem;color:var(--text-main)">What happens next?</h3>
+<ul style="color:var(--text-muted);font-size:0.9rem;margin-left:1.5rem;line-height:1.6"><li>Reports are reviewed by our moderation team</li><li>Violating content will be removed</li><li>Repeat offenders may be banned</li></ul>
+</div>
+<div class="text-center mt-8"><a href="/" style="color:var(--primary)">Back to Home</a></div>
+</main>
+<footer><div class="text-center"><a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/donate">Donate</a></div></footer>
+</div></div>
 </body>
-
 </html>

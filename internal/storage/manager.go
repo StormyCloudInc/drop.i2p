@@ -23,7 +23,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const ChunkSize = 256 * 1024 // 256KB chunks - optimized for I2P retry economics
+const ChunkSize = 128 * 1024 // 128KB chunks - optimized for I2P reliability (smaller = better retry success)
 
 // Encryption version constants
 const (

@@ -1,114 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin - Tools - I2P Secure Share</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin - Tools - I2P Secure Share</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 </head>
-
 <body>
-
-    <div class="main-wrapper">
-        <div class="app-container" style="max-width: 1400px;">
-
-            <header class="header-section">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="text-align: left;">
-                        <a href="/" style="display: inline-block; margin-bottom: 0.5rem;">
-                            <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 40px;">
-                        </a>
-                        <h1>Admin Dashboard</h1>
-                    </div>
-                    <div>
-                        <a href="/" class="btn">Back to Home</a>
-                    </div>
-                </div>
-            </header>
-
-            <main>
-                {{if .Flash}}
-                <div class="alert alert-{{.FlashType}}">
-                    {{.Flash}}
-                </div>
-                {{end}}
-
-                <div class="admin-nav">
-                    <a href="{{.AdminURL}}">Files</a>
-                    <a href="{{.AdminURL}}/reports">Reports</a>
-                    <a href="{{.AdminURL}}/bans">Bans</a>
-                    <a href="{{.AdminURL}}/tools" class="active">Tools</a>
-                    <a href="{{.AdminURL}}/analytics">Analytics</a>
-                </div>
-
-                <div style="display: grid; gap: 1.5rem;">
-
-                    <!-- Garbage Collection -->
-                    <div class="glass-panel" style="padding: 2rem;">
-                        <h2 class="mb-2">Garbage Collection</h2>
-                        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                            Manually trigger cleanup of expired files, pastes, and incomplete uploads.
-                            This normally runs automatically every 15 minutes.
-                        </p>
-                        <form action="{{.AdminURL}}/tools/cleanup" method="POST">
-                            <button type="submit" class="btn btn-primary">Run Cleanup Now</button>
-                        </form>
-                    </div>
-
-                    <!-- Encryption Status -->
-                    <div class="glass-panel" style="padding: 2rem;">
-                        <h2 class="mb-4">Encryption Status</h2>
-                        {{if .HasHybridKeys}}
-                        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
-                            <span class="tag tag-green" style="margin-right: 0.5rem;">✔ Active</span>
-                            <span style="color: var(--success);">Hybrid Post-Quantum Encryption</span>
-                        </div>
-                        <p style="color: var(--text-muted);">
-                            Key Version: <strong
-                                style="color: var(--text-main); font-family: monospace;">{{.KeyVersion}}</strong>
-                        </p>
-                        <p class="mt-2 text-sm text-muted" style="color: var(--text-muted);">Using X25519 + ML-KEM-768
-                            hybrid encryption for quantum resistance.</p>
-                        {{else}}
-                        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
-                            <span class="tag tag-yellow" style="margin-right: 0.5rem;">⚠ Legacy</span>
-                            <span style="color: var(--warning);">Legacy AES-GCM Encryption</span>
-                        </div>
-                        <p class="text-muted" style="color: var(--text-muted);">Configure SSP_X25519_SEED and
-                            SSP_MLKEM_SEED to enable hybrid encryption.</p>
-                        {{end}}
-                    </div>
-
-                    <!-- Key Generation -->
-                    <div class="glass-panel" style="padding: 2rem;">
-                        <h2 class="mb-4">Key Generation</h2>
-                        <p class="text-muted mb-4" style="color: var(--text-muted);">To generate new hybrid encryption
-                            keys, run the key generation utility:</p>
-                        <pre
-                            style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); color: var(--success); font-family: monospace; overflow-x: auto;">./genkeys -env</pre>
-
-                        <p class="text-muted mt-4 mb-2" style="color: var(--text-muted);">For key rotation (higher
-                            version):</p>
-                        <pre
-                            style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); color: var(--success); font-family: monospace; overflow-x: auto;">./genkeys -version 2 -env</pre>
-                    </div>
-                </div>
-
-            </main>
-
-            <footer>
-                <div class="text-center">
-                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
-                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
-                    <a href="/donate">Donate</a>
-                </div>
-            </footer>
-        </div>
-    </div>
-
+<div class="main-wrapper"><div class="app-container" style="max-width:1400px">
+<header class="header-section">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<div style="text-align:left"><a href="/" style="display:inline-block;margin-bottom:0.5rem"><img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height:40px"></a><h1>Admin Dashboard</h1></div>
+<div><a href="/" class="btn">Back to Home</a></div>
+</div>
+</header>
+<main>
+{{if .Flash}}<div class="alert alert-{{.FlashType}}">{{.Flash}}</div>{{end}}
+<div class="admin-nav"><a href="{{.AdminURL}}">Files</a><a href="{{.AdminURL}}/reports">Reports</a><a href="{{.AdminURL}}/bans">Bans</a><a href="{{.AdminURL}}/tools" class="active">Tools</a><a href="{{.AdminURL}}/analytics">Analytics</a></div>
+<div style="display:grid;gap:1.5rem">
+<div class="glass-panel" style="padding:2rem">
+<h2 class="mb-2">Garbage Collection</h2>
+<p style="color:var(--text-muted);margin-bottom:1.5rem">Manually trigger cleanup of expired files, pastes, and incomplete uploads. This normally runs automatically every 15 minutes.</p>
+<form action="{{.AdminURL}}/tools/cleanup" method="POST"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button type="submit" class="btn btn-primary">Run Cleanup Now</button></form>
+</div>
+<div class="glass-panel" style="padding:2rem">
+<h2 class="mb-4">Encryption Status</h2>
+{{if .HasHybridKeys}}<div style="display:flex;align-items:center;margin-bottom:1rem"><span class="tag tag-green" style="margin-right:0.5rem">Active</span><span style="color:var(--success)">Hybrid Post-Quantum Encryption</span></div>
+<p style="color:var(--text-muted)">Key Version: <strong style="color:var(--text-main);font-family:monospace">{{.KeyVersion}}</strong></p>
+<p class="mt-2 text-sm text-muted" style="color:var(--text-muted)">Using X25519 + ML-KEM-768 hybrid encryption for quantum resistance.</p>
+{{else}}<div style="display:flex;align-items:center;margin-bottom:1rem"><span class="tag tag-yellow" style="margin-right:0.5rem">Legacy</span><span style="color:var(--warning)">Legacy AES-GCM Encryption</span></div>
+<p class="text-muted" style="color:var(--text-muted)">Configure SSP_X25519_SEED and SSP_MLKEM_SEED to enable hybrid encryption.</p>{{end}}
+</div>
+<div class="glass-panel" style="padding:2rem">
+<h2 class="mb-4">Key Generation</h2>
+<p class="text-muted mb-4" style="color:var(--text-muted)">To generate new hybrid encryption keys, run the key generation utility:</p>
+<pre style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:var(--radius-sm);color:var(--success);font-family:monospace;overflow-x:auto">./genkeys -env</pre>
+<p class="text-muted mt-4 mb-2" style="color:var(--text-muted)">For key rotation (higher version):</p>
+<pre style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:var(--radius-sm);color:var(--success);font-family:monospace;overflow-x:auto">./genkeys -version 2 -env</pre>
+</div>
+</div>
+</main>
+<footer><div class="text-center"><a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/donate">Donate</a></div></footer>
+</div></div>
 </body>
-
 </html>

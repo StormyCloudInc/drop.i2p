@@ -1,267 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin - Analytics - I2P Secure Share</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin - Analytics - I2P Secure Share</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-
 <body>
-
-    <div class="main-wrapper">
-        <div class="app-container" style="max-width: 1400px;">
-
-            <header class="header-section">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="text-align: left;">
-                        <a href="/" style="display: inline-block; margin-bottom: 0.5rem;">
-                            <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 40px;">
-                        </a>
-                        <h1>Admin Dashboard</h1>
-                    </div>
-                    <div>
-                        <a href="/" class="btn">Back to Home</a>
-                    </div>
-                </div>
-            </header>
-
-            <main>
-                <div class="admin-nav">
-                    <a href="{{.AdminURL}}">Files</a>
-                    <a href="{{.AdminURL}}/reports">Reports</a>
-                    <a href="{{.AdminURL}}/bans">Bans</a>
-                    <a href="{{.AdminURL}}/tools">Tools</a>
-                    <a href="{{.AdminURL}}/analytics" class="active">Analytics</a>
-                </div>
-
-                <!-- Current Stats Overview -->
-                <div class="stats-grid" style="margin-bottom: 2rem;">
-                    <div class="stat-card">
-                        <div class="stat-label">Total Files</div>
-                        <div class="stat-value">{{.Stats.TotalFiles}}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Total Pastes</div>
-                        <div class="stat-value">{{.Stats.TotalPastes}}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Total Downloads</div>
-                        <div class="stat-value">{{.Stats.TotalDownloads}}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Storage Used</div>
-                        <div class="stat-value">{{.Stats.TotalStoredFormatted}}</div>
-                    </div>
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
-
-                    <!-- Storage Trend Chart -->
-                    <div class="glass-panel" style="padding: 1.5rem;">
-                        <h3 style="margin-bottom: 1rem;">Storage Trend (30 Days)</h3>
-                        <canvas id="storageChart" height="200"></canvas>
-                    </div>
-
-                    <!-- Downloads Trend Chart -->
-                    <div class="glass-panel" style="padding: 1.5rem;">
-                        <h3 style="margin-bottom: 1rem;">Downloads Trend (30 Days)</h3>
-                        <canvas id="downloadsChart" height="200"></canvas>
-                    </div>
-
-                    <!-- File Type Distribution -->
-                    <div class="glass-panel" style="padding: 1.5rem;">
-                        <h3 style="margin-bottom: 1rem;">File Type Distribution</h3>
-                        <canvas id="fileTypeChart" height="200"></canvas>
-                    </div>
-
-                    <!-- Top Uploaders -->
-                    <div class="glass-panel" style="padding: 1.5rem;">
-                        <h3 style="margin-bottom: 1rem;">Top Uploaders</h3>
-                        {{if .TopUploaders}}
-                        <div style="overflow-x: auto;">
-                            <table class="data-table" style="font-size: 0.85rem;">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Destination</th>
-                                        <th>Files</th>
-                                        <th>Size</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {{range $i, $u := .TopUploaders}}
-                                    <tr>
-                                        <td>{{inc $i}}</td>
-                                        <td>
-                                            <span class="text-truncate" style="max-width: 200px; display: inline-block;"
-                                                title="{{$u.Destination}}">
-                                                {{truncate $u.Destination 20}}
-                                            </span>
-                                        </td>
-                                        <td>{{$u.FileCount}}</td>
-                                        <td>{{formatBytes $u.TotalBytes}}</td>
-                                    </tr>
-                                    {{end}}
-                                </tbody>
-                            </table>
-                        </div>
-                        {{else}}
-                        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">No uploader data
-                            available.</p>
-                        {{end}}
-                    </div>
-
-                </div>
-
-            </main>
-
-            <footer>
-                <div class="text-center">
-                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
-                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
-                    <a href="/donate">Donate</a>
-                </div>
-            </footer>
-        </div>
-    </div>
-
-    <script>
-        // Chart.js default styling for dark theme
-        Chart.defaults.color = 'rgba(255, 255, 255, 0.7)';
-        Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
-
-        // Parse history data from template
-        const historyData = [
-            {{range .History}}
-            {
-                date: new Date("{{.RecordedAt.Format "2006-01-02T15:04:05Z07:00"}}"),
-                files: {{.TotalFiles}},
-                pastes: {{.TotalPastes}},
-                bytes: {{.TotalBytes}},
-                downloads: {{.TotalDownloads}}
-            },
-            {{end}}
-        ];
-
-        // Format bytes for display
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-        }
-
-        // Storage Trend Chart
-        if (historyData.length > 0) {
-            new Chart(document.getElementById('storageChart'), {
-                type: 'line',
-                data: {
-                    labels: historyData.map(d => d.date.toLocaleDateString()),
-                    datasets: [{
-                        label: 'Storage (GB)',
-                        data: historyData.map(d => (d.bytes / (1024 * 1024 * 1024)).toFixed(2)),
-                        borderColor: 'rgba(56, 189, 248, 1)',
-                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                        fill: true,
-                        tension: 0.3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                callback: function(value) {
-                                    return value + ' GB';
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Downloads Trend Chart
-            new Chart(document.getElementById('downloadsChart'), {
-                type: 'line',
-                data: {
-                    labels: historyData.map(d => d.date.toLocaleDateString()),
-                    datasets: [{
-                        label: 'Total Downloads',
-                        data: historyData.map(d => d.downloads),
-                        borderColor: 'rgba(34, 197, 94, 1)',
-                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                        fill: true,
-                        tension: 0.3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: { beginAtZero: true }
-                    }
-                }
-            });
-        } else {
-            document.getElementById('storageChart').parentElement.innerHTML += '<p style="color: var(--text-muted); text-align: center;">No historical data yet. Stats are recorded hourly.</p>';
-            document.getElementById('downloadsChart').parentElement.innerHTML += '<p style="color: var(--text-muted); text-align: center;">No historical data yet. Stats are recorded hourly.</p>';
-        }
-
-        // File Type Distribution Chart
-        const fileTypeData = [
-            {{range .FileTypes}}
-            { type: "{{.MimeType}}", count: {{.Count}}, bytes: {{.Bytes}} },
-            {{end}}
-        ];
-
-        if (fileTypeData.length > 0) {
-            new Chart(document.getElementById('fileTypeChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: fileTypeData.map(d => d.type),
-                    datasets: [{
-                        data: fileTypeData.map(d => d.count),
-                        backgroundColor: [
-                            'rgba(56, 189, 248, 0.8)',
-                            'rgba(34, 197, 94, 0.8)',
-                            'rgba(251, 191, 36, 0.8)',
-                            'rgba(239, 68, 68, 0.8)',
-                            'rgba(168, 85, 247, 0.8)',
-                            'rgba(236, 72, 153, 0.8)',
-                            'rgba(107, 114, 128, 0.8)'
-                        ],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                boxWidth: 12,
-                                padding: 10
-                            }
-                        }
-                    }
-                }
-            });
-        } else {
-            document.getElementById('fileTypeChart').parentElement.innerHTML += '<p style="color: var(--text-muted); text-align: center;">No file data available.</p>';
-        }
-    </script>
-
+<div class="main-wrapper"><div class="app-container" style="max-width:1400px">
+<header class="header-section">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<div style="text-align:left"><a href="/" style="display:inline-block;margin-bottom:0.5rem"><img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height:40px"></a><h1>Admin Dashboard</h1></div>
+<div><a href="/" class="btn">Back to Home</a></div>
+</div>
+</header>
+<main>
+<div class="admin-nav"><a href="{{.AdminURL}}">Files</a><a href="{{.AdminURL}}/reports">Reports</a><a href="{{.AdminURL}}/bans">Bans</a><a href="{{.AdminURL}}/tools">Tools</a><a href="{{.AdminURL}}/analytics" class="active">Analytics</a></div>
+<div class="stats-grid" style="margin-bottom:2rem">
+<div class="stat-card"><div class="stat-label">Total Files</div><div class="stat-value">{{.Stats.TotalFiles}}</div></div>
+<div class="stat-card"><div class="stat-label">Total Pastes</div><div class="stat-value">{{.Stats.TotalPastes}}</div></div>
+<div class="stat-card"><div class="stat-label">Total Downloads</div><div class="stat-value">{{.Stats.TotalDownloads}}</div></div>
+<div class="stat-card"><div class="stat-label">Storage Used</div><div class="stat-value">{{.Stats.TotalStoredFormatted}}</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+<div class="glass-panel" style="padding:1.5rem"><h3 style="margin-bottom:1rem">Storage Trend (30 Days)</h3><canvas id="storageChart" height="200"></canvas></div>
+<div class="glass-panel" style="padding:1.5rem"><h3 style="margin-bottom:1rem">Downloads Trend (30 Days)</h3><canvas id="downloadsChart" height="200"></canvas></div>
+<div class="glass-panel" style="padding:1.5rem"><h3 style="margin-bottom:1rem">File Type Distribution</h3><canvas id="fileTypeChart" height="200"></canvas></div>
+</div>
+</main>
+<footer><div class="text-center"><a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/donate">Donate</a></div></footer>
+</div></div>
+<script>
+Chart.defaults.color='rgba(255,255,255,0.7)';Chart.defaults.borderColor='rgba(255,255,255,0.1)';
+const historyData=[{{range .History}}{date:new Date("{{.RecordedAt.Format "2006-01-02T15:04:05Z07:00"}}"),files:{{.TotalFiles}},pastes:{{.TotalPastes}},bytes:{{.TotalBytes}},downloads:{{.TotalDownloads}}},{{end}}];
+function formatBytes(b){if(b===0)return'0 B';const k=1024,s=['B','KB','MB','GB','TB'],i=Math.floor(Math.log(b)/Math.log(k));return parseFloat((b/Math.pow(k,i)).toFixed(1))+' '+s[i]}
+if(historyData.length>0){new Chart(document.getElementById('storageChart'),{type:'line',data:{labels:historyData.map(d=>d.date.toLocaleDateString()),datasets:[{label:'Storage (GB)',data:historyData.map(d=>(d.bytes/(1024*1024*1024)).toFixed(2)),borderColor:'rgba(56,189,248,1)',backgroundColor:'rgba(56,189,248,0.1)',fill:true,tension:0.3}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{callback:function(v){return v+' GB'}}}}}});new Chart(document.getElementById('downloadsChart'),{type:'line',data:{labels:historyData.map(d=>d.date.toLocaleDateString()),datasets:[{label:'Total Downloads',data:historyData.map(d=>d.downloads),borderColor:'rgba(34,197,94,1)',backgroundColor:'rgba(34,197,94,0.1)',fill:true,tension:0.3}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}})}else{document.getElementById('storageChart').parentElement.innerHTML+='<p style="color:var(--text-muted);text-align:center">No historical data yet. Stats are recorded hourly.</p>';document.getElementById('downloadsChart').parentElement.innerHTML+='<p style="color:var(--text-muted);text-align:center">No historical data yet. Stats are recorded hourly.</p>'}
+const fileTypeData=[{{range .FileTypes}}{type:"{{.MimeType}}",count:{{.Count}},bytes:{{.Bytes}}},{{end}}];
+if(fileTypeData.length>0){new Chart(document.getElementById('fileTypeChart'),{type:'doughnut',data:{labels:fileTypeData.map(d=>d.type),datasets:[{data:fileTypeData.map(d=>d.count),backgroundColor:['rgba(56,189,248,0.8)','rgba(34,197,94,0.8)','rgba(251,191,36,0.8)','rgba(239,68,68,0.8)','rgba(168,85,247,0.8)','rgba(236,72,153,0.8)','rgba(107,114,128,0.8)'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'right',labels:{boxWidth:12,padding:10}}}}})}else{document.getElementById('fileTypeChart').parentElement.innerHTML+='<p style="color:var(--text-muted);text-align:center">No file data available.</p>'}
+</script>
 </body>
-
 </html>

@@ -15,6 +15,9 @@ import (
 	"drop-i2p/internal/webhook"
 )
 
+// Version is the application version, set during build or manually updated
+const Version = "2.1"
+
 func main() {
 	cfg := config.Load()
 
@@ -35,7 +38,7 @@ func main() {
 	clamAVScanner := clamav.NewScanner(cfg)
 	store.SetClamAVChecker(clamAVScanner)
 
-	srv := server.New(cfg, store)
+	srv := server.New(cfg, store, Version)
 
 	// Start background tasks
 	go startBackgroundTasks(cfg, store, srv.Webhook())

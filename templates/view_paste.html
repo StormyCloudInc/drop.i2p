@@ -1,203 +1,89 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Paste - I2P Secure Share</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <style>
-        .code-container {
-            background-color: #282a36;
-            border-radius: var(--radius-md);
-            border: 1px solid var(--border-color);
-            overflow: hidden;
-            margin-bottom: 2rem;
-            box-shadow: var(--shadow-lg);
-        }
-
-        .code-content {
-            margin: 0;
-            padding: 1.5rem;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-family: 'Fira Code', 'Courier New', Courier, monospace;
-            font-size: 14px;
-            line-height: 1.6;
-            color: #f8f8f2;
-            overflow-x: auto;
-        }
-
-        .meta-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-
-
-
-        .link-box {
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid var(--border-color);
-            padding: 1rem;
-            border-radius: var(--radius-sm);
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .link-box input {
-            background: transparent;
-            border: none;
-            font-family: monospace;
-            color: var(--text-muted);
-            width: 100%;
-        }
-
-        .report-section {
-            margin-top: 2rem;
-            border-top: 1px solid var(--border-color);
-            padding-top: 2rem;
-            text-align: center;
-        }
-
-        .report-form {
-            max-width: 400px;
-            margin: 1rem auto;
-            text-align: left;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>View Paste - I2P Secure Share</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<style>
+.code-container{background-color:#282a36;border-radius:var(--radius-md);border:1px solid var(--border-color);overflow:hidden;margin-bottom:2rem;box-shadow:var(--shadow-lg)}
+.code-content{margin:0;padding:1.5rem;white-space:pre-wrap;word-wrap:break-word;font-family:'Fira Code','Courier New',Courier,monospace;font-size:14px;line-height:1.6;color:#f8f8f2;overflow-x:auto}
+.meta-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:1rem}
+.link-box{background:rgba(0,0,0,0.2);border:1px solid var(--border-color);padding:1rem;border-radius:var(--radius-sm);margin-bottom:1.5rem;display:flex;align-items:center;gap:0.5rem}
+.link-box input{background:transparent;border:none;font-family:monospace;color:var(--text-muted);width:100%}
+.report-section{margin-top:2rem;border-top:1px solid var(--border-color);padding-top:2rem;text-align:center}
+.report-form{max-width:400px;margin:1rem auto;text-align:left}
+</style>
 </head>
-
 <body>
-
-    {{if .Announcement}}
-    <div
-        style="background: rgba(56, 189, 248, 0.1); border-bottom: 1px solid rgba(56, 189, 248, 0.2); padding: 0.75rem; text-align: center; color: var(--text-main);">
-        <strong>Notice:</strong> {{.Announcement}}
-    </div>
-    {{end}}
-
-    <div class="main-wrapper">
-        <div class="app-container" style="max-width: 1200px;">
-
-            <header class="header-section" style="margin-bottom: 2rem;">
-                <a href="/" style="display: inline-block; margin-bottom: 1rem;">
-                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 79px;">
-                </a>
-                <h1>View Paste</h1>
-                {{if .TimeLeft}}
-                <p style="color: var(--text-muted);">Expires in: <span
-                        style="color: var(--warning);">{{.TimeLeft}}</span>
-                </p>
-                {{else}}
-                <p style="color: var(--success); font-weight: bold;">Permanent Paste</p>
-                {{end}}
-            </header>
-
-            <main>
-                {{if .Flash}}
-                <div class="alert alert-{{.FlashType}}">
-                    {{.Flash}}
-                </div>
-                {{end}}
-
-                <div class="meta-bar">
-                    <span style="color: var(--text-muted);">Language: <strong
-                            style="color: var(--primary);">{{.DisplayLanguage}}</strong></span>
-                    <form method="get" action="/p/{{.Paste.ID}}" id="lang-form"
-                        style="display: flex; gap: 0.5rem; align-items: center;">
-                        <label for="lang"
-                            style="color: var(--text-muted); font-size: 0.9rem; margin: 0;">Syntax:</label>
-                        <select name="lang" id="lang" onchange="this.form.submit()"
-                            style="padding: 0.25rem 0.5rem; font-size: 0.9rem; width: auto;">
-                            <option value="text" {{if eq .DisplayLanguage "text" }}selected{{end}}>Plain Text</option>
-                            <option value="bash" {{if eq .DisplayLanguage "bash" }}selected{{end}}>Bash</option>
-                            <option value="c" {{if eq .DisplayLanguage "c" }}selected{{end}}>C</option>
-                            <option value="cpp" {{if eq .DisplayLanguage "cpp" }}selected{{end}}>C++</option>
-                            <option value="css" {{if eq .DisplayLanguage "css" }}selected{{end}}>CSS</option>
-                            <option value="go" {{if eq .DisplayLanguage "go" }}selected{{end}}>Go</option>
-                            <option value="html" {{if eq .DisplayLanguage "html" }}selected{{end}}>HTML</option>
-                            <option value="java" {{if eq .DisplayLanguage "java" }}selected{{end}}>Java</option>
-                            <option value="javascript" {{if eq .DisplayLanguage "javascript" }}selected{{end}}>JavaScript</option>
-                            <option value="json" {{if eq .DisplayLanguage "json" }}selected{{end}}>JSON</option>
-                            <option value="python" {{if eq .DisplayLanguage "python" }}selected{{end}}>Python</option>
-                            <option value="ruby" {{if eq .DisplayLanguage "ruby" }}selected{{end}}>Ruby</option>
-                            <option value="rust" {{if eq .DisplayLanguage "rust" }}selected{{end}}>Rust</option>
-                            <option value="sql" {{if eq .DisplayLanguage "sql" }}selected{{end}}>SQL</option>
-                            <option value="typescript" {{if eq .DisplayLanguage "typescript" }}selected{{end}}>TypeScript</option>
-                            <option value="xml" {{if eq .DisplayLanguage "xml" }}selected{{end}}>XML</option>
-                            <option value="yaml" {{if eq .DisplayLanguage "yaml" }}selected{{end}}>YAML</option>
-                        </select>
-                        <noscript><button type="submit" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.9rem;">Apply</button></noscript>
-                    </form>
-                </div>
-
-                <div class="code-container">
-                    <pre class="code-content">{{.Content}}</pre>
-                </div>
-
-                <div class="glass-panel" style="padding: 1.5rem; max-width: 800px; margin: 0 auto;">
-                    <div class="download-box">
-                        <span style="color: var(--text-muted); font-size: 0.9rem; white-space: nowrap;">Share
-                            Link:</span>
-                        <input type="text" value="{{.Host}}/p/{{.Paste.ID}}" readonly
-                            onclick="this.select()">
-                        <a href="/p/{{.Paste.ID}}/raw" target="_blank" class="btn"
-                            style="padding: 0.4rem 0.8rem; font-size: 0.8rem; text-decoration: none;">Raw</a>
-                    </div>
-
-                    {{if .DeleteToken}}
-                    <div class="download-box" style="border-color: rgba(248, 113, 113, 0.3);">
-                        <span style="color: var(--error); font-size: 0.9rem; white-space: nowrap;">Delete Link:</span>
-                        <input type="text" value="{{.Host}}/pd/{{.Paste.ID}}/{{.DeleteToken}}" readonly
-                            onclick="this.select()" style="color: var(--error);">
-                    </div>
-                    {{end}}
-
-                    <div class="report-section">
-                        <details>
-                            <summary class="btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.9rem; cursor: pointer; list-style: none;">Report Abuse</summary>
-                            <div class="report-form" style="margin-top: 1rem;">
-                                <form action="/report" method="post">
-                                    <input type="hidden" name="file_url" value="/p/{{.Paste.ID}}">
-                                    <div class="mb-4">
-                                        <label>Reason</label>
-                                        <select name="reason">
-                                            <option value="illegal">Illegal content</option>
-                                            <option value="malware">Malware/Virus code</option>
-                                            <option value="copyright">Copyright violation</option>
-                                            <option value="spam">Spam</option>
-                                            <option value="other">Other</option>
-                                        </select>
-                                    </div>
-                                    <button type="submit" class="btn btn-danger w-full">Submit Report</button>
-                                </form>
-                            </div>
-                        </details>
-                    </div>
-                </div>
-
-                <div class="text-center mt-8">
-                    <a href="/#paste" style="color: var(--primary);">Create another paste</a>
-                </div>
-
-            </main>
-
-            <footer>
-                <div class="text-center">
-                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
-                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
-                    <a href="/donate">Donate</a>
-                </div>
-            </footer>
-        </div>
-
+{{if .Announcement}}<div style="background:rgba(56,189,248,0.1);border-bottom:1px solid rgba(56,189,248,0.2);padding:0.75rem;text-align:center;color:var(--text-main)"><strong>Notice:</strong> {{.Announcement}}</div>{{end}}
+<div class="main-wrapper"><div class="app-container" style="max-width:1200px">
+<header class="header-section" style="margin-bottom:2rem">
+<a href="/" style="display:inline-block;margin-bottom:1rem"><img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height:79px"></a>
+<h1>View Paste</h1>
+{{if .TimeLeft}}<p style="color:var(--text-muted)">Expires in: <span style="color:var(--warning)">{{.TimeLeft}}</span></p>{{else}}<p style="color:var(--success);font-weight:bold">Permanent Paste</p>{{end}}
+</header>
+<main>
+{{if .Flash}}<div class="alert alert-{{.FlashType}}">{{.Flash}}</div>{{end}}
+<div class="meta-bar">
+<span style="color:var(--text-muted)">Language: <strong style="color:var(--primary)">{{.DisplayLanguage}}</strong></span>
+<form method="get" action="/p/{{.Paste.ID}}" id="lang-form" style="display:flex;gap:0.5rem;align-items:center">
+<label for="lang" style="color:var(--text-muted);font-size:0.9rem;margin:0">Syntax:</label>
+<select name="lang" id="lang" onchange="this.form.submit()" style="padding:0.25rem 0.5rem;font-size:0.9rem;width:auto">
+<option value="text" {{if eq .DisplayLanguage "text"}}selected{{end}}>Plain Text</option>
+<option value="bash" {{if eq .DisplayLanguage "bash"}}selected{{end}}>Bash</option>
+<option value="c" {{if eq .DisplayLanguage "c"}}selected{{end}}>C</option>
+<option value="cpp" {{if eq .DisplayLanguage "cpp"}}selected{{end}}>C++</option>
+<option value="css" {{if eq .DisplayLanguage "css"}}selected{{end}}>CSS</option>
+<option value="go" {{if eq .DisplayLanguage "go"}}selected{{end}}>Go</option>
+<option value="html" {{if eq .DisplayLanguage "html"}}selected{{end}}>HTML</option>
+<option value="java" {{if eq .DisplayLanguage "java"}}selected{{end}}>Java</option>
+<option value="javascript" {{if eq .DisplayLanguage "javascript"}}selected{{end}}>JavaScript</option>
+<option value="json" {{if eq .DisplayLanguage "json"}}selected{{end}}>JSON</option>
+<option value="python" {{if eq .DisplayLanguage "python"}}selected{{end}}>Python</option>
+<option value="ruby" {{if eq .DisplayLanguage "ruby"}}selected{{end}}>Ruby</option>
+<option value="rust" {{if eq .DisplayLanguage "rust"}}selected{{end}}>Rust</option>
+<option value="sql" {{if eq .DisplayLanguage "sql"}}selected{{end}}>SQL</option>
+<option value="typescript" {{if eq .DisplayLanguage "typescript"}}selected{{end}}>TypeScript</option>
+<option value="xml" {{if eq .DisplayLanguage "xml"}}selected{{end}}>XML</option>
+<option value="yaml" {{if eq .DisplayLanguage "yaml"}}selected{{end}}>YAML</option>
+</select>
+<noscript><button type="submit" class="btn" style="padding:0.25rem 0.5rem;font-size:0.9rem">Apply</button></noscript>
+</form>
+</div>
+<div class="code-container"><pre class="code-content">{{.Content}}</pre></div>
+<div class="glass-panel" style="padding:1.5rem;max-width:800px;margin:0 auto">
+<div class="download-box">
+<span style="color:var(--text-muted);font-size:0.9rem;white-space:nowrap">Share Link:</span>
+<input type="text" value="{{.Host}}/p/{{.Paste.ID}}" readonly onclick="this.select()">
+<a href="/p/{{.Paste.ID}}/raw" target="_blank" class="btn" style="padding:0.4rem 0.8rem;font-size:0.8rem;text-decoration:none">Raw</a>
+</div>
+{{if .DeleteToken}}
+<div class="download-box" style="border-color:rgba(248,113,113,0.3)">
+<span style="color:var(--error);font-size:0.9rem;white-space:nowrap">Delete Link:</span>
+<input type="text" value="{{.Host}}/pd/{{.Paste.ID}}/{{.DeleteToken}}" readonly onclick="this.select()" style="color:var(--error)">
+</div>
+{{end}}
+<div class="report-section">
+<details>
+<summary class="btn" style="background:transparent;border:1px solid var(--border-color);color:var(--text-muted);font-size:0.9rem;cursor:pointer;list-style:none">Report Abuse</summary>
+<div class="report-form" style="margin-top:1rem">
+<form action="/report" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="file_url" value="/p/{{.Paste.ID}}">
+<div class="mb-4"><label>Reason</label>
+<select name="reason"><option value="illegal">Illegal content</option><option value="malware">Malware/Virus code</option><option value="copyright">Copyright violation</option><option value="spam">Spam</option><option value="other">Other</option></select></div>
+<button type="submit" class="btn btn-danger w-full">Submit Report</button>
+</form>
+</div>
+</details>
+</div>
+</div>
+<div class="text-center" style="margin-top:1.5rem"><a href="https://gitlab.com/stormycloud/drop.i2p/-/releases/v{{.Version}}" target="_blank" style="color:var(--text-muted);font-size:0.75rem">v{{.Version}}</a></div>
+<div class="text-center" style="margin-top:0.5rem"><a href="/#paste" style="color:var(--primary)">Create another paste</a></div>
+</main>
+<footer><div class="text-center"><a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/donate">Donate</a></div></footer>
+</div>
 </body>
-
 </html>

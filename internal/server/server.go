@@ -98,9 +98,10 @@ type Server struct {
 	clamAV       *clamav.Scanner
 	webhook      *webhook.Notifier
 	announcement *AnnouncementReader
+	version      string
 }
 
-func New(cfg *config.Config, store *storage.Manager) *Server {
+func New(cfg *config.Config, store *storage.Manager, version string) *Server {
 	// Initialize HTTP bridge transport (works with Java I2P's i2ptunnel)
 	transport := i2p.NewHTTPBridgeTransport()
 
@@ -133,6 +134,7 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 		clamAV:       clamAVScanner,
 		webhook:      webhookNotifier,
 		announcement: announcementReader,
+		version:      version,
 	}
 }
 
@@ -148,9 +150,10 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 
-	// Gzip compression for responses (significant bandwidth savings on I2P)
+	// Gzip compression for responses (maximum compression for I2P bandwidth savings)
+	// Level 9 = best compression, slightly more CPU but significant bandwidth reduction
 	// Note: chi requires exact content-type match, so include charset variants
-	r.Use(middleware.Compress(5,
+	r.Use(middleware.Compress(9,
 		"text/html",
 		"text/html; charset=utf-8",
 		"text/css",
@@ -171,23 +174,62 @@ func (s *Server) Router() http.Handler {
 	// Rate limiting middleware (per I2P destination)
 	r.Use(mw.RateLimitMiddleware(s.rateLimiter))
 
-	// Static Files
-	// Static Files
-	fs := http.FileServer(http.Dir("static"))
+	// Security headers middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Content Security Policy - allows inline styles/scripts and self-embedding for PDF/media previews
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; object-src 'self'; form-action 'self'")
+
+			// Prevent MIME type sniffing
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+
+			// Allow same-origin framing for PDF embeds (SAMEORIGIN instead of DENY)
+			w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+
+			// Control referrer information
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+
+			// Disable browser features we don't need
+			w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// CSRF protection middleware (works without JavaScript)
+	r.Use(mw.CSRF(mw.DefaultCSRFConfig()))
+
+	// Static Files - with path traversal protection and caching for I2P bandwidth optimization
 	r.Get("/static/*", func(w http.ResponseWriter, r *http.Request) {
-		rctx := chi.RouteContext(r.Context())
-		opts := rctx.URLParams
-		pathPrefix := "/static/"
-		if len(opts.Keys) > 0 { // Should not happen with * wildcard but to be safe
-			// ..
-		}
-		// Clean the path to avoid traversal/confusion
-		path := r.URL.Path
-		if strings.HasSuffix(path, "/") {
+		// Get the file path after /static/
+		filePath := chi.URLParam(r, "*")
+
+		// Reject path traversal attempts
+		if strings.Contains(filePath, "..") || strings.Contains(filePath, "\\") {
 			http.NotFound(w, r)
 			return
 		}
-		http.StripPrefix(pathPrefix, fs).ServeHTTP(w, r)
+
+		// Reject paths starting with /
+		if strings.HasPrefix(filePath, "/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Reject directory listings
+		if filePath == "" || strings.HasSuffix(filePath, "/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Set aggressive caching headers for I2P bandwidth savings
+		// Static assets rarely change, so cache for 7 days
+		w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+		w.Header().Set("Vary", "Accept-Encoding")
+
+		// Serve file safely
+		http.ServeFile(w, r, "static/"+filePath)
 	})
 	r.Get("/", s.handleIndex)
 	r.Post("/upload", s.handleUpload)

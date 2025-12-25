@@ -1,575 +1,172 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>I2P Secure Share</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <style>
-        /* Logic to show content based on checked radio */
-        #tab-file:checked~.content-panels #panel-file,
-        #tab-paste:checked~.content-panels #panel-paste,
-        #tab-api:checked~.content-panels #panel-api,
-        #tab-stats:checked~.content-panels #panel-stats,
-        #tab-tos:checked~.content-panels #panel-tos {
-            display: block;
-        }
-
-        /* Feature Cards */
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin-top: 4rem;
-        }
-
-        .feature-item {
-            background: rgba(30, 41, 59, 0.4);
-            padding: 1.5rem;
-            border-radius: var(--radius-md);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I2P Secure Share</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<style>
+#tab-file:checked~.content-panels #panel-file,#tab-paste:checked~.content-panels #panel-paste,#tab-api:checked~.content-panels #panel-api,#tab-stats:checked~.content-panels #panel-stats,#tab-tos:checked~.content-panels #panel-tos{display:block}
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1.5rem;margin-top:4rem}
+.feature-item{background:rgba(30,41,59,0.4);padding:1.5rem;border-radius:var(--radius-md);border:1px solid rgba(255,255,255,0.05)}
+</style>
 </head>
-
 <body>
-
-    {{if .Announcement}}
-    <div
-        style="background: rgba(56, 189, 248, 0.1); border-bottom: 1px solid rgba(56, 189, 248, 0.2); padding: 0.75rem; text-align: center; color: var(--text-main);">
-        <strong>Notice:</strong> {{.Announcement}}
-    </div>
-    {{end}}
-
-    <div class="main-wrapper">
-        <div class="app-container">
-
-            <header class="header-section">
-                <a href="/" style="display: inline-block; margin-bottom: 1.5rem;">
-                    <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 79px;">
-                </a>
-                <h1>I2P Secure Share</h1>
-                <p style="color: var(--text-muted);">Anonymous, Encrypted, Persistent.</p>
-            </header>
-
-            <main>
-                {{if .Flash}}
-                <div class="alert alert-{{.FlashType}}">
-                    {{.Flash}}
-                </div>
-                {{end}}
-
-                <!-- CSS-Only Tabs Controller -->
-                <div class="glass-panel" style="padding: 2rem;">
-                    <div class="tabs">
-                        <input type="radio" name="nav" id="tab-file" checked>
-                        <label for="tab-file">File Upload</label>
-
-                        <input type="radio" name="nav" id="tab-paste">
-                        <label for="tab-paste">Pastebin</label>
-
-                        <input type="radio" name="nav" id="tab-api">
-                        <label for="tab-api">API</label>
-
-                        <input type="radio" name="nav" id="tab-stats">
-                        <label for="tab-stats">Stats</label>
-
-                        <input type="radio" name="nav" id="tab-tos">
-                        <label for="tab-tos">Terms</label>
-
-                        <!-- These define the structure where siblings are toggled -->
-                        <div class="content-panels" style="width: 100%; margin-top: 1.5rem;">
-
-                            <!-- File Upload Panel -->
-                            <div id="panel-file" class="tab-content">
-                                <form action="/upload" method="POST" enctype="multipart/form-data">
-                                    <div class="mb-6">
-                                        <input type="file" name="file" id="file-input" multiple required>
-                                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Max
-                                            50MB. Executables blocked. Select multiple files to create a collection.</p>
-                                    </div>
-
-                                    <div
-                                        style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
-                                        <div>
-                                            <label for="file-expiry">Expires In</label>
-                                            <select name="expiry" id="file-expiry">
-                                                <option value="15m">15 Minutes</option>
-                                                <option value="1h">1 Hour</option>
-                                                <option value="2h">2 Hours</option>
-                                                <option value="4h">4 Hours</option>
-                                                <option value="12h">12 Hours</option>
-                                                <option value="24h" selected>24 Hours</option>
-                                                <option value="168h">7 Days</option>
-                                                <option value="720h">30 Days</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label for="max-downloads">Max Views (Optional)</label>
-                                            <input type="number" name="max_downloads" id="max-downloads" min="1"
-                                                placeholder="Unlimited">
-                                        </div>
-                                    </div>
-
-                                    <div class="mb-6">
-                                        <label class="mb-4">Advance Options</label>
-                                        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-                                            <label
-                                                style="display: flex; align-items: center; cursor: pointer; font-weight: normal;">
-                                                <input type="checkbox" name="keep_metadata" value="1"
-                                                    style="width: auto; margin-right: 0.5rem;">
-                                                Keep Metadata
-                                            </label>
-                                            <label
-                                                style="display: flex; align-items: center; cursor: pointer; font-weight: normal;">
-                                                <input type="checkbox" id="toggle-password"
-                                                    style="width: auto; margin-right: 0.5rem;"
-                                                    onchange="document.getElementById('password-field').style.display = this.checked ? 'block' : 'none'">
-                                                Password Protect
-                                            </label>
-                                            <label
-                                                style="display: flex; align-items: center; cursor: pointer; font-weight: normal; color: var(--primary);"
-                                                title="Recommended for files over 2MB">
-                                                <input type="checkbox" id="use-progress-bar"
-                                                    style="width: auto; margin-right: 0.5rem;"
-                                                    onchange="toggleProgressBarMode(this.checked)">
-                                                Advanced Upload <span style="font-size: 0.8em; color: var(--text-muted); margin-left: 0.25rem;">(for large files)</span>
-                                            </label>
-                                        </div>
-
-                                        <div id="password-field" style="display: none; margin-top: 1rem;">
-                                            <input type="password" name="password"
-                                                placeholder="Enter encryption password">
-                                        </div>
-                                    </div>
-
-                                    <div id="upload-progress-container" class="hidden mb-6">
-                                        <div
-                                            style="background: var(--bg-input); border-radius: var(--radius-sm); height: 20px; overflow: hidden; position: relative;">
-                                            <div id="upload-progress-bar"
-                                                style="background: var(--primary); width: 0%; height: 100%; transition: width 0.2s;">
-                                            </div>
-                                        </div>
-                                        <div id="upload-status"
-                                            style="text-align: center; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
-                                            0%</div>
-                                    </div>
-
-                                    <button type="submit" class="btn btn-primary w-full">Encrypted Upload</button>
-                                </form>
-                            </div>
-
-                            <!-- Pastebin Panel -->
-                            <div id="panel-paste" class="tab-content">
-                                <form action="/upload/paste" method="POST">
-                                    <div class="mb-6">
-                                        <textarea name="content" id="paste-content" rows="12"
-                                            style="font-family: monospace;" required
-                                            placeholder="Paste your text or code here..."></textarea>
-                                    </div>
-
-                                    <div
-                                        style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
-                                        <div>
-                                            <label for="paste-language">Syntax Highlighting</label>
-                                            <select name="language" id="paste-language">
-                                                <option value="text">Plain Text</option>
-                                                <option value="markdown">Markdown</option>
-                                                <option value="go">Go</option>
-                                                <option value="python">Python</option>
-                                                <option value="javascript">JavaScript</option>
-                                                <option value="html">HTML</option>
-                                                <option value="css">CSS</option>
-                                                <option value="bash">Bash</option>
-                                                <option value="sql">SQL</option>
-                                                <option value="json">JSON</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label for="paste-expiry">Expires In</label>
-                                            <select name="expiry" id="paste-expiry">
-                                                <option value="1h" selected>1 Hour</option>
-                                                <option value="24h">24 Hours</option>
-                                                <option value="168h">7 Days</option>
-                                                <option value="720h">30 Days</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <button type="submit" class="btn btn-primary w-full">Create Paste</button>
-                                </form>
-                            </div>
-
-                            <!-- API Panel -->
-                            <div id="panel-api" class="tab-content">
-                                <!-- File Upload API -->
-                                <div class="feature-item mb-4">
-                                    <h3 style="font-size: 1.1rem; margin-bottom: 0.75rem; color: var(--primary);">POST /api/upload</h3>
-                                    <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-size: 0.9rem;">Upload a file using multipart/form-data.</p>
-
-                                    <div style="margin-bottom: 1rem;">
-                                        <strong style="color: var(--text-main); font-size: 0.85rem;">Parameters:</strong>
-                                        <ul style="margin-left: 1.5rem; margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem; list-style: disc;">
-                                            <li><code style="color: var(--primary);">file</code> (required) - The file to upload (max 50MB)</li>
-                                            <li><code style="color: var(--primary);">expiry</code> - Expiration time: 15m, 1h, 2h, 4h, 12h, 24h, 168h (7 days), 720h (30 days). Default: 24h</li>
-                                            <li><code style="color: var(--primary);">password</code> - Optional password protection</li>
-                                            <li><code style="color: var(--primary);">max_downloads</code> - Max download count before auto-delete</li>
-                                            <li><code style="color: var(--primary);">keep_metadata</code> - Set to "1" to preserve EXIF/GPS data</li>
-                                        </ul>
-                                    </div>
-
-                                    <strong style="color: var(--text-main); font-size: 0.85rem;">Example:</strong>
-                                    <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem; margin-top: 0.5rem;"><code>$ curl -X POST -F "file=@linuxiso.torrent" -F "expiry=168h" http://{{.Host}}/api/upload</code></pre>
-
-                                    <div style="margin-top: 0.75rem;">
-                                        <strong style="color: var(--text-main); font-size: 0.85rem;">Response:</strong>
-                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{
-  "id": "k7x9m2",
-  "url": "/f/k7x9m2",
-  "delete_token": "a4f8c1e9b2d6"
-}</code></pre>
-                                    </div>
-
-                                    <div style="margin-top: 0.75rem;">
-                                        <strong style="color: var(--text-main); font-size: 0.85rem;">With password protection:</strong>
-                                        <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem; margin-top: 0.5rem;"><code>$ curl -X POST \
-  -F "file=@linuxiso.torrent" \
-  -F "expiry=168h" \
-  -F "password=secretpass" \
-  -F "max_downloads=10" \
-  http://{{.Host}}/api/upload</code></pre>
-                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{
-  "id": "p3n8v5",
-  "url": "/f/p3n8v5",
-  "delete_token": "x7k2m9q4w1"
-}</code></pre>
-                                    </div>
-                                </div>
-
-                                <!-- Paste API -->
-                                <div class="feature-item">
-                                    <h3 style="font-size: 1.1rem; margin-bottom: 0.75rem; color: var(--primary);">POST /api/upload/paste</h3>
-                                    <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-size: 0.9rem;">Create a paste using JSON.</p>
-
-                                    <div style="margin-bottom: 1rem;">
-                                        <strong style="color: var(--text-main); font-size: 0.85rem;">JSON Fields:</strong>
-                                        <ul style="margin-left: 1.5rem; margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem; list-style: disc;">
-                                            <li><code style="color: var(--primary);">content</code> (required) - The text content</li>
-                                            <li><code style="color: var(--primary);">language</code> - Syntax highlighting: text, markdown, go, python, javascript, html, css, bash, sql, json. Default: text</li>
-                                            <li><code style="color: var(--primary);">expiry</code> - Expiration time: 1h, 24h, 168h, 720h. Default: 1h</li>
-                                        </ul>
-                                    </div>
-
-                                    <strong style="color: var(--text-main); font-size: 0.85rem;">Example:</strong>
-                                    <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: var(--radius-sm); overflow-x: auto; color: #a5b4fc; font-size: 0.85rem; margin-top: 0.5rem;"><code>$ curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"content": "#!/bin/bash\necho Hello from I2P", "language": "bash", "expiry": "24h"}' \
-  http://{{.Host}}/api/upload/paste</code></pre>
-
-                                    <div style="margin-top: 0.75rem;">
-                                        <strong style="color: var(--text-main); font-size: 0.85rem;">Response:</strong>
-                                        <pre style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); overflow-x: auto; color: #86efac; font-size: 0.8rem; margin-top: 0.5rem;"><code>{
-  "id": "r2t6y8",
-  "url": "/p/r2t6y8",
-  "delete_token": "h5j3k7l9m1"
-}</code></pre>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Stats Panel -->
-                            <div id="panel-stats" class="tab-content" style="text-align: center;">
-                                <div
-                                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-top: 2rem;">
-                                    <div class="feature-item">
-                                        <div
-                                            style="font-size: 3rem; font-weight: 700; color: var(--primary); line-height: 1;">
-                                            {{.Stats.TotalFiles}}</div>
-                                        <div style="color: var(--text-muted); margin-top: 0.5rem;">Files Uploaded</div>
-                                    </div>
-                                    <div class="feature-item">
-                                        <div
-                                            style="font-size: 3rem; font-weight: 700; color: var(--secondary); line-height: 1;">
-                                            {{.Stats.TotalPastes}}</div>
-                                        <div style="color: var(--text-muted); margin-top: 0.5rem;">Pastes Created</div>
-                                    </div>
-                                    <div class="feature-item">
-                                        <div
-                                            style="font-size: 3rem; font-weight: 700; color: var(--success); line-height: 1;">
-                                            {{.Stats.TotalStoredFormatted}}</div>
-                                        <div style="color: var(--text-muted); margin-top: 0.5rem;">Data Stored (Lifetime)</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- TOS Panel -->
-                            <div id="panel-tos" class="tab-content">
-                                <div style="color: var(--text-muted);">
-                                    <p class="mb-4" style="font-size: 0.9rem;"><strong>Last Updated:</strong> December 2025</p>
-                                    <p class="mb-4">By using this service you agree to these terms. The service is provided "as-is" with a focus on privacy.</p>
-
-                                    <h3 style="color: var(--text-main); margin-top: 1.5rem; font-size: 1.2rem;">1.
-                                        Privacy & Data</h3>
-                                    <ul class="mb-4" style="margin-left: 1.5rem; list-style: disc;">
-                                        <li>No user identity logs are kept.</li>
-                                        <li>All uploads are encrypted at rest using hybrid post-quantum cryptography (X25519 + ML-KEM-768).</li>
-                                        <li>Data auto-deletes after expiry or download limit is reached.</li>
-                                        <li>GPS, EXIF, and other metadata are automatically stripped from images, videos, audio, and PDFs unless you opt to keep it.</li>
-                                    </ul>
-
-                                    <h3 style="color: var(--text-main); margin-top: 1.5rem; font-size: 1.2rem;">2.
-                                        Acceptable Use</h3>
-                                    <p class="mb-4">Do not upload illegal or harmful content. We reserve the right to remove content that violates these terms.</p>
-
-                                    <h3 style="color: var(--text-main); margin-top: 1.5rem; font-size: 1.2rem;">3.
-                                        Liability</h3>
-                                    <p style="margin-bottom: 1.5rem;">This free service comes with no warranties. We are not responsible for data loss.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Features Section -->
-                <div class="features-grid">
-                    <div class="feature-item">
-                        <h3 class="mb-4" style="color: var(--primary);">Encrypted at Rest</h3>
-                        <p style="color: var(--text-muted);">All files are encrypted server-side using quantum-resistant
-                            cryptography before being stored.</p>
-                    </div>
-                    <div class="feature-item">
-                        <h3 class="mb-4" style="color: var(--secondary);">Resumable Downloads</h3>
-                        <p style="color: var(--text-muted);">Built for I2P with chunked storage and HTTP Range request
-                            support.</p>
-                    </div>
-                    <div class="feature-item">
-                        <h3 class="mb-4" style="color: var(--success);">Metadata Stripping</h3>
-                        <p style="color: var(--text-muted);">GPS, EXIF, and other metadata are automatically removed
-                            from images, videos, audio, and PDFs.</p>
-                    </div>
-                </div>
-
-            </main>
-
-            <footer>
-                <div class="text-center">
-                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
-                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
-                    <a href="/donate">Donate</a>
-                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
-                    <a href="/report">Report Abuse</a>
-                </div>
-            </footer>
-        </div>
-    </div>
-
-    <script>
-        // Advanced Upload mode toggle
-        let useProgressBar = false;
-        function toggleProgressBarMode(enabled) {
-            useProgressBar = enabled;
-            const container = document.getElementById('upload-progress-container');
-            if (!enabled) {
-                container.classList.add('hidden');
-                document.getElementById('upload-progress-bar').style.width = '0%';
-            }
-        }
-
-        const uploadForm = document.querySelector('#panel-file form');
-
-        if (uploadForm) {
-            uploadForm.addEventListener('submit', async (e) => {
-                const fileInput = document.getElementById('file-input');
-                if (!fileInput.files.length) return;
-
-                // If multiple files selected, auto-create collection using main form settings
-                if (fileInput.files.length > 1) {
-                    e.preventDefault();
-                    await uploadMultipleAsCollection(fileInput.files);
-                    return;
-                }
-
-                // Single file with advanced mode - use progress bar
-                if (useProgressBar) {
-                    e.preventDefault();
-                    await uploadSingleWithProgress(fileInput.files[0]);
-                    return;
-                }
-
-                // Single file without advanced mode - let form submit normally
-            });
-        }
-
-        // Upload single file with progress bar
-        async function uploadSingleWithProgress(file) {
-            const formData = new FormData(uploadForm);
-            const progressBar = document.getElementById('upload-progress-bar');
-            const progressStatus = document.getElementById('upload-status');
-            const container = document.getElementById('upload-progress-container');
-            const submitBtn = uploadForm.querySelector('button[type="submit"]');
-
-            container.classList.remove('hidden');
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Uploading...';
-
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/api/upload', true);
-
-            xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable) {
-                    const percent = Math.round((event.loaded / event.total) * 100);
-                    progressBar.style.width = percent + '%';
-                    progressStatus.textContent = percent + '% Uploaded';
-                }
-            };
-
-            xhr.onload = () => {
-                if (xhr.status === 200) {
-                    try {
-                        const res = JSON.parse(xhr.responseText);
-                        if (res.id) {
-                            progressStatus.textContent = 'Processing...';
-                            const viewUrl = '/view/' + res.id;
-                            const params = new URLSearchParams();
-                            params.set('flash', 'Upload Successful');
-                            params.set('flash_type', 'success');
-                            if (res.delete_token) {
-                                params.set('token', res.delete_token);
-                            }
-                            window.location.href = viewUrl + '?' + params.toString();
-                        } else {
-                            throw new Error('Invalid response');
-                        }
-                    } catch (err) {
-                        alert('Upload failed: Invalid server response');
-                        resetUploadUI();
-                    }
-                } else {
-                    alert('Upload failed: ' + xhr.statusText);
-                    resetUploadUI();
-                }
-            };
-
-            xhr.onerror = () => {
-                alert('Upload failed: Network error');
-                resetUploadUI();
-            };
-
-            xhr.send(formData);
-
-            function resetUploadUI() {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Encrypted Upload';
-                container.classList.add('hidden');
-                progressBar.style.width = '0%';
-            }
-        }
-
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-        }
-
-        // Upload multiple files as a collection using main form settings
-        async function uploadMultipleAsCollection(files) {
-            if (files.length === 0) return;
-            if (files.length > 50) {
-                alert('Maximum 50 files per collection');
-                return;
-            }
-
-            // Get settings from main form
-            const expiry = document.getElementById('file-expiry').value;
-            const passwordEnabled = document.getElementById('toggle-password').checked;
-            const password = passwordEnabled ? document.querySelector('#password-field input').value : '';
-
-            // Auto-generate title
-            const now = new Date();
-            const title = 'Collection - ' + now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-            const progressBar = document.getElementById('upload-progress-bar');
-            const progressStatus = document.getElementById('upload-status');
-            const container = document.getElementById('upload-progress-container');
-            const submitBtn = uploadForm.querySelector('button[type="submit"]');
-
-            container.classList.remove('hidden');
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Uploading...';
-
-            const uploadedFileIds = [];
-
-            try {
-                // Upload each file
-                for (let i = 0; i < files.length; i++) {
-                    const file = files[i];
-                    const percent = Math.round(((i) / files.length) * 90);
-                    progressBar.style.width = percent + '%';
-                    progressStatus.textContent = `Uploading ${i + 1}/${files.length}: ${file.name}`;
-
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    formData.append('expiry', expiry);
-
-                    const response = await fetch('/api/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(`Failed to upload ${file.name}: ${errorText}`);
-                    }
-
-                    const result = await response.json();
-                    if (!result.id) {
-                        throw new Error(`Invalid response for ${file.name}`);
-                    }
-                    uploadedFileIds.push(result.id);
-                }
-
-                // Create collection
-                progressStatus.textContent = 'Creating collection...';
-                progressBar.style.width = '95%';
-
-                const collectionResponse = await fetch('/api/collection/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        title: title,
-                        description: '',
-                        file_ids: uploadedFileIds,
-                        password: password,
-                        expiry: expiry
-                    })
-                });
-
-                if (!collectionResponse.ok) {
-                    throw new Error('Failed to create collection');
-                }
-
-                const collection = await collectionResponse.json();
-                progressBar.style.width = '100%';
-                progressStatus.textContent = 'Collection created!';
-
-                // Redirect to collection page
-                setTimeout(() => {
-                    window.location.href = collection.url + '?token=' + collection.delete_token + '&flash=Collection+created+successfully&flash_type=success';
-                }, 300);
-
-            } catch (error) {
-                alert('Error: ' + error.message);
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Encrypted Upload';
-                container.classList.add('hidden');
-                progressBar.style.width = '0%';
-            }
-        }
-    </script>
+{{if .Announcement}}<div style="background:rgba(56,189,248,0.1);border-bottom:1px solid rgba(56,189,248,0.2);padding:0.75rem;text-align:center;color:var(--text-main)"><strong>Notice:</strong> {{.Announcement}}</div>{{end}}
+<div class="main-wrapper"><div class="app-container">
+<header class="header-section">
+<a href="/" style="display:inline-block;margin-bottom:1.5rem"><img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height:79px"></a>
+<h1>I2P Secure Share</h1>
+<p style="color:var(--text-muted)">Anonymous, Encrypted, Persistent.</p>
+</header>
+<main>
+{{if .Flash}}<div class="alert alert-{{.FlashType}}">{{.Flash}}</div>{{end}}
+<div class="glass-panel" style="padding:2rem">
+<div class="tabs">
+<input type="radio" name="nav" id="tab-file" checked><label for="tab-file">File Upload</label>
+<input type="radio" name="nav" id="tab-paste"><label for="tab-paste">Pastebin</label>
+<input type="radio" name="nav" id="tab-api"><label for="tab-api">API</label>
+<input type="radio" name="nav" id="tab-stats"><label for="tab-stats">Stats</label>
+<input type="radio" name="nav" id="tab-tos"><label for="tab-tos">Terms</label>
+<div class="content-panels" style="width:100%;margin-top:1.5rem">
+<div id="panel-file" class="tab-content">
+<form action="/upload" method="POST" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<div class="mb-6">
+<input type="file" name="file" id="file-input" multiple required>
+<p style="font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem">Max 50MB. Executables blocked. Select multiple files to create a collection.</p>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem">
+<div><label for="file-expiry">Expires In</label>
+<select name="expiry" id="file-expiry">
+<option value="15m">15 Minutes</option><option value="1h">1 Hour</option><option value="2h">2 Hours</option><option value="4h">4 Hours</option><option value="12h">12 Hours</option><option value="24h" selected>24 Hours</option><option value="168h">7 Days</option><option value="720h">30 Days</option>
+</select></div>
+<div><label for="max-downloads">Max Views (Optional)</label>
+<input type="number" name="max_downloads" id="max-downloads" min="1" placeholder="Unlimited"></div>
+</div>
+<div class="mb-6">
+<label class="mb-4">Advance Options</label>
+<div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+<label style="display:flex;align-items:center;cursor:pointer;font-weight:normal"><input type="checkbox" name="keep_metadata" value="1" style="width:auto;margin-right:0.5rem">Keep Metadata</label>
+<label style="display:flex;align-items:center;cursor:pointer;font-weight:normal"><input type="checkbox" id="toggle-password" style="width:auto;margin-right:0.5rem" onchange="document.getElementById('password-field').style.display=this.checked?'block':'none'">Password Protect</label>
+<label style="display:flex;align-items:center;cursor:pointer;font-weight:normal;color:var(--primary)" title="Recommended for files over 2MB"><input type="checkbox" id="use-progress-bar" style="width:auto;margin-right:0.5rem" onchange="toggleProgressBarMode(this.checked)">Advanced Upload <span style="font-size:0.8em;color:var(--text-muted);margin-left:0.25rem">(for large files)</span></label>
+</div>
+<div id="password-field" style="display:none;margin-top:1rem"><input type="password" name="password" placeholder="Enter encryption password"></div>
+</div>
+<div id="upload-progress-container" class="hidden mb-6">
+<div style="background:var(--bg-input);border-radius:var(--radius-sm);height:20px;overflow:hidden;position:relative"><div id="upload-progress-bar" style="background:var(--primary);width:0%;height:100%;transition:width 0.2s"></div></div>
+<div id="upload-status" style="text-align:center;font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem">0%</div>
+</div>
+<button type="submit" class="btn btn-primary w-full">Encrypted Upload</button>
+</form>
+</div>
+<div id="panel-paste" class="tab-content">
+<form action="/upload/paste" method="POST">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<div class="mb-6"><textarea name="content" id="paste-content" rows="12" style="font-family:monospace" required placeholder="Paste your text or code here..."></textarea></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem">
+<div><label for="paste-language">Syntax Highlighting</label>
+<select name="language" id="paste-language">
+<option value="text">Plain Text</option><option value="markdown">Markdown</option><option value="go">Go</option><option value="python">Python</option><option value="javascript">JavaScript</option><option value="html">HTML</option><option value="css">CSS</option><option value="bash">Bash</option><option value="sql">SQL</option><option value="json">JSON</option>
+</select></div>
+<div><label for="paste-expiry">Expires In</label>
+<select name="expiry" id="paste-expiry">
+<option value="1h" selected>1 Hour</option><option value="24h">24 Hours</option><option value="168h">7 Days</option><option value="720h">30 Days</option>
+</select></div>
+</div>
+<button type="submit" class="btn btn-primary w-full">Create Paste</button>
+</form>
+</div>
+<div id="panel-api" class="tab-content">
+<div class="feature-item mb-4">
+<h3 style="font-size:1.1rem;margin-bottom:0.75rem;color:var(--primary)">POST /api/upload</h3>
+<p style="color:var(--text-muted);margin-bottom:0.75rem;font-size:0.9rem">Upload a file using multipart/form-data.</p>
+<div style="margin-bottom:1rem">
+<strong style="color:var(--text-main);font-size:0.85rem">Parameters:</strong>
+<ul style="margin-left:1.5rem;margin-top:0.5rem;color:var(--text-muted);font-size:0.85rem;list-style:disc">
+<li><code style="color:var(--primary)">file</code> (required) - The file to upload (max 50MB)</li>
+<li><code style="color:var(--primary)">expiry</code> - Expiration time: 15m, 1h, 2h, 4h, 12h, 24h, 168h (7 days), 720h (30 days). Default: 24h</li>
+<li><code style="color:var(--primary)">password</code> - Optional password protection</li>
+<li><code style="color:var(--primary)">max_downloads</code> - Max download count before auto-delete</li>
+<li><code style="color:var(--primary)">keep_metadata</code> - Set to "1" to preserve EXIF/GPS data</li>
+</ul>
+</div>
+<strong style="color:var(--text-main);font-size:0.85rem">Example:</strong>
+<pre style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:var(--radius-sm);overflow-x:auto;color:#a5b4fc;font-size:0.85rem;margin-top:0.5rem"><code>$ curl -X POST -F "file=@linuxiso.torrent" -F "expiry=168h" http://{{.Host}}/api/upload</code></pre>
+<div style="margin-top:0.75rem">
+<strong style="color:var(--text-main);font-size:0.85rem">Response:</strong>
+<pre style="background:rgba(0,0,0,0.3);padding:0.75rem;border-radius:var(--radius-sm);overflow-x:auto;color:#86efac;font-size:0.8rem;margin-top:0.5rem"><code>{"id":"k7x9m2","url":"/f/k7x9m2","delete_token":"a4f8c1e9b2d6"}</code></pre>
+</div>
+<div style="margin-top:0.75rem">
+<strong style="color:var(--text-main);font-size:0.85rem">With password protection:</strong>
+<pre style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:var(--radius-sm);overflow-x:auto;color:#a5b4fc;font-size:0.85rem;margin-top:0.5rem"><code>$ curl -X POST -F "file=@linuxiso.torrent" -F "expiry=168h" -F "password=secretpass" -F "max_downloads=10" http://{{.Host}}/api/upload</code></pre>
+<pre style="background:rgba(0,0,0,0.3);padding:0.75rem;border-radius:var(--radius-sm);overflow-x:auto;color:#86efac;font-size:0.8rem;margin-top:0.5rem"><code>{"id":"p3n8v5","url":"/f/p3n8v5","delete_token":"x7k2m9q4w1"}</code></pre>
+</div>
+</div>
+<div class="feature-item">
+<h3 style="font-size:1.1rem;margin-bottom:0.75rem;color:var(--primary)">POST /api/upload/paste</h3>
+<p style="color:var(--text-muted);margin-bottom:0.75rem;font-size:0.9rem">Create a paste using JSON.</p>
+<div style="margin-bottom:1rem">
+<strong style="color:var(--text-main);font-size:0.85rem">JSON Fields:</strong>
+<ul style="margin-left:1.5rem;margin-top:0.5rem;color:var(--text-muted);font-size:0.85rem;list-style:disc">
+<li><code style="color:var(--primary)">content</code> (required) - The text content</li>
+<li><code style="color:var(--primary)">language</code> - Syntax highlighting: text, markdown, go, python, javascript, html, css, bash, sql, json. Default: text</li>
+<li><code style="color:var(--primary)">expiry</code> - Expiration time: 1h, 24h, 168h, 720h. Default: 1h</li>
+</ul>
+</div>
+<strong style="color:var(--text-main);font-size:0.85rem">Example:</strong>
+<pre style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:var(--radius-sm);overflow-x:auto;color:#a5b4fc;font-size:0.85rem;margin-top:0.5rem"><code>$ curl -X POST -H "Content-Type: application/json" -d '{"content":"#!/bin/bash\necho Hello from I2P","language":"bash","expiry":"24h"}' http://{{.Host}}/api/upload/paste</code></pre>
+<div style="margin-top:0.75rem">
+<strong style="color:var(--text-main);font-size:0.85rem">Response:</strong>
+<pre style="background:rgba(0,0,0,0.3);padding:0.75rem;border-radius:var(--radius-sm);overflow-x:auto;color:#86efac;font-size:0.8rem;margin-top:0.5rem"><code>{"id":"r2t6y8","url":"/p/r2t6y8","delete_token":"h5j3k7l9m1"}</code></pre>
+</div>
+</div>
+</div>
+<div id="panel-stats" class="tab-content" style="text-align:center">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.5rem;margin-top:2rem">
+<div class="feature-item"><div style="font-size:3rem;font-weight:700;color:var(--primary);line-height:1">{{.Stats.TotalFiles}}</div><div style="color:var(--text-muted);margin-top:0.5rem">Files Uploaded</div></div>
+<div class="feature-item"><div style="font-size:3rem;font-weight:700;color:var(--secondary);line-height:1">{{.Stats.TotalPastes}}</div><div style="color:var(--text-muted);margin-top:0.5rem">Pastes Created</div></div>
+<div class="feature-item"><div style="font-size:3rem;font-weight:700;color:var(--success);line-height:1">{{.Stats.TotalStoredFormatted}}</div><div style="color:var(--text-muted);margin-top:0.5rem">Data Stored (Lifetime)</div></div>
+</div>
+</div>
+<div id="panel-tos" class="tab-content">
+<div style="color:var(--text-muted)">
+<p class="mb-4" style="font-size:0.9rem"><strong>Last Updated:</strong> December 2025</p>
+<p class="mb-4">By using this service you agree to these terms. The service is provided "as-is" with a focus on privacy.</p>
+<h3 style="color:var(--text-main);margin-top:1.5rem;font-size:1.2rem">1. Privacy & Data</h3>
+<ul class="mb-4" style="margin-left:1.5rem;list-style:disc">
+<li>No user identity logs are kept.</li>
+<li>All uploads are encrypted at rest using hybrid post-quantum cryptography (X25519 + ML-KEM-768).</li>
+<li>Data auto-deletes after expiry or download limit is reached.</li>
+<li>GPS, EXIF, and other metadata are automatically stripped from images, videos, audio, and PDFs unless you opt to keep it.</li>
+</ul>
+<h3 style="color:var(--text-main);margin-top:1.5rem;font-size:1.2rem">2. Acceptable Use</h3>
+<p class="mb-4">Do not upload illegal or harmful content. We reserve the right to remove content that violates these terms.</p>
+<h3 style="color:var(--text-main);margin-top:1.5rem;font-size:1.2rem">3. Liability</h3>
+<p style="margin-bottom:1.5rem">This free service comes with no warranties. We are not responsible for data loss.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="text-center" style="margin-top:0.5rem"><a href="https://gitlab.com/stormycloud/drop.i2p/-/releases/v{{.Version}}" target="_blank" style="color:var(--text-muted);font-size:0.75rem">v{{.Version}}</a></div>
+<div class="features-grid">
+<div class="feature-item"><h3 class="mb-4" style="color:var(--primary)">Encrypted at Rest</h3><p style="color:var(--text-muted)">All files are encrypted server-side using quantum-resistant cryptography before being stored.</p></div>
+<div class="feature-item"><h3 class="mb-4" style="color:var(--secondary)">Resumable Downloads</h3><p style="color:var(--text-muted)">Built for I2P with chunked storage and HTTP Range request support.</p></div>
+<div class="feature-item"><h3 class="mb-4" style="color:var(--success)">Metadata Stripping</h3><p style="color:var(--text-muted)">GPS, EXIF, and other metadata are automatically removed from images, videos, audio, and PDFs.</p></div>
+</div>
+</main>
+<footer><div class="text-center"><a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/donate">Donate</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/report">Report Abuse</a></div></footer>
+</div></div>
+<script>
+let useProgressBar=false;const advancedCheckbox=document.getElementById('use-progress-bar'),fileInput=document.getElementById('file-input'),uploadForm=document.querySelector('#panel-file form');
+function toggleProgressBarMode(e){useProgressBar=e;const c=document.getElementById('upload-progress-container');if(!e){c.classList.add('hidden');document.getElementById('upload-progress-bar').style.width='0%'}}
+if(fileInput){fileInput.addEventListener('change',function(){const btn=uploadForm.querySelector('button[type="submit"]');if(this.files.length>1){if(advancedCheckbox&&!advancedCheckbox.checked){advancedCheckbox.checked=true;toggleProgressBarMode(true)}if(btn)btn.textContent='Upload Collection ('+this.files.length+' files)'}else if(this.files.length===1&&btn)btn.textContent='Encrypted Upload'})}
+if(uploadForm){uploadForm.addEventListener('submit',async(e)=>{if(!fileInput.files.length)return;if(fileInput.files.length>1){e.preventDefault();await uploadMultipleAsCollection(fileInput.files);return}if(useProgressBar){e.preventDefault();await uploadSingleWithProgress(fileInput.files[0])}})}
+async function uploadSingleWithProgress(file){const formData=new FormData(uploadForm),progressBar=document.getElementById('upload-progress-bar'),progressStatus=document.getElementById('upload-status'),container=document.getElementById('upload-progress-container'),submitBtn=uploadForm.querySelector('button[type="submit"]');container.classList.remove('hidden');submitBtn.disabled=true;submitBtn.textContent='Uploading...';const xhr=new XMLHttpRequest();xhr.open('POST','/api/upload',true);xhr.upload.onprogress=(e)=>{if(e.lengthComputable){const p=Math.round((e.loaded/e.total)*100);progressBar.style.width=p+'%';progressStatus.textContent=p+'% Uploaded'}};xhr.onload=()=>{if(xhr.status===200){try{const r=JSON.parse(xhr.responseText);if(r.id){progressStatus.textContent='Processing...';const params=new URLSearchParams();params.set('flash','Upload Successful');params.set('flash_type','success');if(r.delete_token)params.set('token',r.delete_token);window.location.href='/view/'+r.id+'?'+params.toString()}else throw new Error('Invalid response')}catch(err){alert('Upload failed: Invalid server response');resetUI()}}else{alert('Upload failed: '+xhr.statusText);resetUI()}};xhr.onerror=()=>{alert('Upload failed: Network error');resetUI()};xhr.send(formData);function resetUI(){submitBtn.disabled=false;submitBtn.textContent='Encrypted Upload';container.classList.add('hidden');progressBar.style.width='0%'}}
+function formatFileSize(b){if(b===0)return'0 B';const k=1024,s=['B','KB','MB','GB'],i=Math.floor(Math.log(b)/Math.log(k));return parseFloat((b/Math.pow(k,i)).toFixed(1))+' '+s[i]}
+async function uploadMultipleAsCollection(files){if(files.length===0)return;if(files.length>50){alert('Maximum 50 files per collection');return}const expiry=document.getElementById('file-expiry').value,passwordEnabled=document.getElementById('toggle-password').checked,password=passwordEnabled?document.querySelector('#password-field input').value:'',now=new Date(),title='Collection - '+now.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),progressBar=document.getElementById('upload-progress-bar'),progressStatus=document.getElementById('upload-status'),container=document.getElementById('upload-progress-container'),submitBtn=uploadForm.querySelector('button[type="submit"]');container.classList.remove('hidden');submitBtn.disabled=true;submitBtn.textContent='Uploading...';const uploadedFileIds=[];try{for(let i=0;i<files.length;i++){const file=files[i],percent=Math.round(((i)/files.length)*90);progressBar.style.width=percent+'%';progressStatus.textContent=`Uploading ${i+1}/${files.length}: ${file.name}`;const formData=new FormData();formData.append('file',file);formData.append('expiry',expiry);const response=await fetch('/api/upload',{method:'POST',body:formData});if(!response.ok)throw new Error(`Failed to upload ${file.name}: ${await response.text()}`);const result=await response.json();if(!result.id)throw new Error(`Invalid response for ${file.name}`);uploadedFileIds.push(result.id)}progressStatus.textContent='Creating collection...';progressBar.style.width='95%';const collectionResponse=await fetch('/api/collection/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:title,description:'',file_ids:uploadedFileIds,password:password,expiry:expiry})});if(!collectionResponse.ok)throw new Error('Failed to create collection');const collection=await collectionResponse.json();progressBar.style.width='100%';progressStatus.textContent='Collection created!';setTimeout(()=>{window.location.href=collection.url+'?token='+collection.delete_token+'&flash=Collection+created+successfully&flash_type=success'},300)}catch(error){alert('Error: '+error.message);submitBtn.disabled=false;submitBtn.textContent='Encrypted Upload';container.classList.add('hidden');progressBar.style.width='0%'}}
+</script>
 </body>
-
 </html>
