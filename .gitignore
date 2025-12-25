@@ -1,14 +1,38 @@
+# Data and uploads
 uploads/
 database.db
-.DS_Store
-upload*
+database.db-*
 *.db
 .env
-wsgi.py
 
-# Ignore Python cache files
-__pycache__/
-*.py[cod]
-# Ignore virtual environment directories
-venv/
+# Build artifacts
+drop
+drop.exe
+drop-linux
+drop-linux-amd64
+drop-i2p
+drop-i2p.exe
+drop-i2p-linux
+genkeys
+hashpw
+*.exe
+*.tar
+deploy.tar
 
+# Logs
+*.log
+debug.log
+
+# Test files
+stress_test.db
+reproduce_*.go
+verify_*.go
+
+# IDE/Editor
+.claude/
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
