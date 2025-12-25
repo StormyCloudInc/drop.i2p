@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Collection.Title}} - I2P Secure Share</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+</head>
+<body>
+{{if .Announcement}}<div style="background:rgba(56,189,248,0.1);border-bottom:1px solid rgba(56,189,248,0.2);padding:0.75rem;text-align:center;color:var(--text-main)"><strong>Notice:</strong> {{.Announcement}}</div>{{end}}
+<div class="main-wrapper"><div class="app-container">
+<header class="header-section">
+<a href="/" style="display:inline-block;margin-bottom:1.5rem"><img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height:79px"></a>
+<h1>{{.Collection.Title}}</h1>
+{{if .Collection.Description}}<p style="color:var(--text-muted);margin-top:0.5rem">{{.Collection.Description}}</p>{{end}}
+</header>
+<main>
+{{if .Flash}}<div class="alert alert-{{.FlashType}}">{{.Flash}}</div>{{end}}
+{{if .NeedsPassword}}
+<div class="glass-panel" style="padding:2rem;max-width:400px;margin:0 auto">
+<h2 style="margin-bottom:1.5rem;text-align:center">Password Protected</h2>
+<p style="color:var(--text-muted);margin-bottom:1.5rem;text-align:center">This collection is password protected. Enter the password to view.</p>
+<form action="/c/{{.Collection.ID}}/unlock" method="POST">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<div class="mb-6"><input type="password" name="password" placeholder="Enter password" required autofocus></div>
+<button type="submit" class="btn btn-primary w-full">Unlock Collection</button>
+</form>
+</div>
+{{else}}
+<div class="glass-panel" style="padding:1.5rem;margin-bottom:1.5rem">
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem">
+<div><span style="color:var(--text-muted)">{{.FileCount}} files</span><span style="margin:0 0.5rem;opacity:0.3">|</span><span style="color:var(--text-muted)">{{formatBytes .TotalSize}} total</span><span style="margin:0 0.5rem;opacity:0.3">|</span><span style="color:var(--text-muted)">{{.Collection.ViewCount}} views</span></div>
+{{if .Collection.ExpiryTime}}<div style="color:var(--warning)">Expires: {{.Collection.ExpiryTime.Format "Jan 02, 2006 15:04"}}</div>{{end}}
+</div>
+</div>
+{{if .DeleteToken}}<div class="alert alert-success" style="margin-bottom:1.5rem"><strong>Collection created!</strong> Save this delete link: <a href="/cd/{{.Collection.ID}}/{{.DeleteToken}}" style="word-break:break-all;color:var(--primary)">/cd/{{.Collection.ID}}/{{.DeleteToken}}</a></div>{{end}}
+<div class="glass-panel" style="padding:0">
+<h3 style="padding:1rem;border-bottom:1px solid var(--border-color)">Files in Collection</h3>
+{{if .Files}}
+<div style="overflow-x:auto">
+<table class="data-table">
+<thead><tr><th>#</th><th>Filename</th><th>Size</th><th>Type</th><th>Actions</th></tr></thead>
+<tbody>
+{{range $i, $f := .Files}}<tr><td>{{inc $i}}</td><td><a href="/view/{{$f.ID}}" style="color:var(--primary)">{{$f.Filename}}</a></td><td>{{formatBytes $f.Size}}</td><td><span class="tag tag-blue">{{$f.MimeType}}</span></td><td><a href="/f/{{$f.ID}}" class="btn" style="padding:0.3rem 0.75rem;font-size:0.85rem">Download</a></td></tr>{{end}}
+</tbody>
+</table>
+</div>
+{{else}}<div style="padding:3rem;text-align:center;color:var(--text-muted)">No files in this collection.</div>{{end}}
+</div>
+<div class="glass-panel" style="padding:1.5rem;margin-top:1.5rem">
+<div style="margin-bottom:1rem">
+<label style="display:block;color:var(--text-muted);font-size:0.9rem;margin-bottom:0.5rem">Share Link:</label>
+<div style="display:flex;gap:0.5rem;align-items:center">
+<input type="text" id="share-link" value="{{.Host}}/c/{{.Collection.ID}}" readonly onclick="this.select()" style="flex:1;margin:0">
+<button type="button" class="btn" id="copy-btn" style="padding:0.5rem 1rem;white-space:nowrap">Copy</button>
+</div>
+</div>
+<script>document.getElementById('copy-btn').addEventListener('click',function(){var l=document.getElementById('share-link').value;navigator.clipboard.writeText(l).then(function(){document.getElementById('copy-btn').textContent='Copied!';setTimeout(function(){document.getElementById('copy-btn').textContent='Copy'},2000)})})</script>
+<div class="report-section" style="margin-top:1.5rem;border-top:1px solid var(--border-color);padding-top:1.5rem;text-align:center">
+<details>
+<summary class="btn" style="background:transparent;border:1px solid var(--border-color);color:var(--text-muted);font-size:0.9rem;cursor:pointer;list-style:none">Report Abuse</summary>
+<div style="max-width:400px;margin:1rem auto;text-align:left">
+<form action="/report" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="file_url" value="/c/{{.Collection.ID}}">
+<div class="mb-4"><label>Reason</label><select name="reason"><option value="illegal">Illegal content</option><option value="malware">Malware/Virus</option><option value="copyright">Copyright violation</option><option value="spam">Spam</option><option value="other">Other</option></select></div>
+<button type="submit" class="btn btn-danger w-full">Submit Report</button>
+</form>
+</div>
+</details>
+</div>
+</div>
+<div class="text-center" style="margin-top:1.5rem"><a href="https://gitlab.com/stormycloud/drop.i2p/-/releases/v{{.Version}}" target="_blank" style="color:var(--text-muted);font-size:0.75rem">v{{.Version}}</a></div>
+<div class="text-center" style="margin-top:0.5rem"><a href="/" style="color:var(--primary)">Upload another file</a></div>
+{{end}}
+</main>
+<footer><div class="text-center"><a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/donate">Donate</a><span style="margin:0 1rem;opacity:0.3">|</span><a href="/report">Report Abuse</a></div></footer>
+</div></div>
+</body>
+</html>
