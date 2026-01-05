@@ -9,7 +9,6 @@ import (
 	"drop-i2p/internal/clamav"
 	"drop-i2p/internal/config"
 	"drop-i2p/internal/db"
-	"drop-i2p/internal/photodna"
 	"drop-i2p/internal/server"
 	"drop-i2p/internal/storage"
 	"drop-i2p/internal/webhook"
@@ -26,10 +25,6 @@ func main() {
 
 	// Initialize storage manager
 	store := storage.NewManager(cfg)
-
-	// Initialize PhotoDNA scanner and attach to storage manager for chunked uploads
-	photoDNAScanner := photodna.NewScanner(cfg)
-	store.SetPhotoDNAChecker(photoDNAScanner)
 
 	// Initialize ClamAV scanner and attach to storage manager for chunked uploads
 	clamAVScanner := clamav.NewScanner(cfg)

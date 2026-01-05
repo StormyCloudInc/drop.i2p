@@ -250,16 +250,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PhotoDNA check for images (before encryption/storage)
-	if s.photoDNA.ShouldCheck(mimeType) {
-		if blocked, _ := s.photoDNA.CheckImage(r.Context(), fileData); blocked {
-			s.store.IncrementStat("photodna_blocked")
-			renderMessage(w, http.StatusForbidden, "error", "Upload Blocked", "This content cannot be uploaded.")
-			return
-		}
-	}
-
-	// ClamAV check for non-image files (before encryption/storage)
+	// ClamAV virus scan (before encryption/storage)
 	if s.clamAV.ShouldCheck(mimeType) {
 		if infected, threat, _ := s.clamAV.CheckFile(r.Context(), fileData); infected {
 			s.store.IncrementStat("clamav_blocked")
@@ -1278,18 +1269,7 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PhotoDNA check for images (before encryption/storage)
-	if s.photoDNA.ShouldCheck(mimeType) {
-		if blocked, _ := s.photoDNA.CheckImage(r.Context(), fileData); blocked {
-			s.store.IncrementStat("photodna_blocked")
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Content not allowed"})
-			return
-		}
-	}
-
-	// ClamAV check for non-image files (before encryption/storage)
+	// ClamAV virus scan (before encryption/storage)
 	if s.clamAV.ShouldCheck(mimeType) {
 		if infected, threat, _ := s.clamAV.CheckFile(r.Context(), fileData); infected {
 			s.store.IncrementStat("clamav_blocked")

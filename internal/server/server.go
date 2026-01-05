@@ -12,7 +12,6 @@ import (
 	"drop-i2p/internal/i2p"
 	"drop-i2p/internal/metadata"
 	mw "drop-i2p/internal/middleware"
-	"drop-i2p/internal/photodna"
 	"drop-i2p/internal/storage"
 	"drop-i2p/internal/webhook"
 
@@ -94,7 +93,6 @@ type Server struct {
 	transport    i2p.Transport
 	rateLimiter  *mw.RateLimiter
 	stripper     *metadata.Stripper
-	photoDNA     *photodna.Scanner
 	clamAV       *clamav.Scanner
 	webhook      *webhook.Notifier
 	announcement *AnnouncementReader
@@ -109,9 +107,6 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 
 	// Initialize metadata stripper
 	stripper := metadata.NewStripper()
-
-	// Initialize PhotoDNA scanner
-	photoDNAScanner := photodna.NewScanner(cfg)
 
 	// Initialize ClamAV scanner
 	clamAVScanner := clamav.NewScanner(cfg)
@@ -129,7 +124,6 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 		transport:    transport,
 		rateLimiter:  rateLimiter,
 		stripper:     stripper,
-		photoDNA:     photoDNAScanner,
 		clamAV:       clamAVScanner,
 		webhook:      webhookNotifier,
 		announcement: announcementReader,

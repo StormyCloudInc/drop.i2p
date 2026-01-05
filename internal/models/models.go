@@ -94,7 +94,6 @@ type Stats struct {
 	TotalDownloads       int64  `json:"total_downloads"`
 	TotalAPIUploads      int64  `json:"total_api_uploads"`
 	TotalStoredFormatted string `json:"total_stored_formatted"`
-	PhotoDNABlocked      int64  `json:"photodna_blocked"`
 	ClamAVBlocked        int64  `json:"clamav_blocked"`
 }
 

@@ -38,12 +38,6 @@ type UploadOptions struct {
 	MetadataStripped bool
 }
 
-// PhotoDNAChecker interface for image content checking
-type PhotoDNAChecker interface {
-	ShouldCheck(mimeType string) bool
-	CheckImage(ctx context.Context, imageData []byte) (blocked bool, err error)
-}
-
 // ClamAVChecker interface for virus/malware scanning
 type ClamAVChecker interface {
 	ShouldCheck(mimeType string) bool
@@ -53,7 +47,6 @@ type ClamAVChecker interface {
 type Manager struct {
 	cfg        *config.Config
 	keyManager *crypto.KeyManager
-	photoDNA   PhotoDNAChecker
 	clamAV     ClamAVChecker
 }
 
@@ -64,11 +57,6 @@ func NewManager(cfg *config.Config) *Manager {
 // NewManagerWithKeys creates a Manager with hybrid PQ encryption support
 func NewManagerWithKeys(cfg *config.Config, km *crypto.KeyManager) *Manager {
 	return &Manager{cfg: cfg, keyManager: km}
-}
-
-// SetPhotoDNAChecker sets the PhotoDNA checker for image content scanning
-func (m *Manager) SetPhotoDNAChecker(checker PhotoDNAChecker) {
-	m.photoDNA = checker
 }
 
 // SetClamAVChecker sets the ClamAV checker for virus/malware scanning
@@ -840,8 +828,6 @@ func (m *Manager) GetStats() (*models.Stats, error) {
 				stats.TotalAPIUploads = value
 			case "total_bytes_stored":
 				stats.TotalStoredFormatted = formatBytes(value)
-			case "photodna_blocked":
-				stats.PhotoDNABlocked = value
 			case "clamav_blocked":
 				stats.ClamAVBlocked = value
 			}
@@ -1430,12 +1416,10 @@ func (m *Manager) CompleteChunkedUpload(uploadID string) (*models.File, string, 
 		return nil, "", err
 	}
 
-	// Check if this file needs scanning
-	needsPhotoDNA := m.photoDNA != nil && m.photoDNA.ShouldCheck(upload.MimeType)
+	// Check if this file needs ClamAV scanning
 	needsClamAV := m.clamAV != nil && m.clamAV.ShouldCheck(upload.MimeType)
-	needsBuffering := needsPhotoDNA || needsClamAV
 
-	// First pass: Decrypt all chunks and optionally buffer for scanning
+	// First pass: Decrypt all chunks and buffer for scanning if needed
 	var fileBuffer bytes.Buffer
 	var decryptedChunks [][]byte
 
@@ -1458,37 +1442,12 @@ func (m *Manager) CompleteChunkedUpload(uploadID string) (*models.File, string, 
 		}
 
 		decryptedChunks = append(decryptedChunks, plaintext)
-		if needsBuffering {
+		if needsClamAV {
 			fileBuffer.Write(plaintext)
 		}
 	}
 
-	// PhotoDNA check for images (before re-encryption/storage)
-	if needsPhotoDNA {
-		blocked, err := m.photoDNA.CheckImage(context.Background(), fileBuffer.Bytes())
-		if blocked {
-			m.IncrementStat("photodna_blocked")
-			// Clean up upload chunks
-			for _, uc := range chunks {
-				os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
-			}
-			db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
-			db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
-			return nil, "", fmt.Errorf("content blocked")
-		}
-		if err != nil {
-			// Error handling depends on fail-open setting (handled in CheckImage)
-			// If we get here with an error, it means fail-closed rejected it
-			for _, uc := range chunks {
-				os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
-			}
-			db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
-			db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
-			return nil, "", fmt.Errorf("content check failed: %w", err)
-		}
-	}
-
-	// ClamAV check for non-image files (before re-encryption/storage)
+	// ClamAV virus scan (before re-encryption/storage)
 	if needsClamAV {
 		infected, threat, err := m.clamAV.CheckFile(context.Background(), fileBuffer.Bytes())
 		if infected {

@@ -14,18 +14,6 @@ import (
 	"drop-i2p/internal/config"
 )
 
-// Image MIME types that PhotoDNA handles - ClamAV skips these
-var imageMimeTypes = map[string]bool{
-	"image/jpeg":    true,
-	"image/png":     true,
-	"image/gif":     true,
-	"image/webp":    true,
-	"image/bmp":     true,
-	"image/tiff":    true,
-	"image/x-icon":  true,
-	"image/svg+xml": true,
-}
-
 // Scanner handles ClamAV virus scanning via clamd daemon
 type Scanner struct {
 	mu        sync.RWMutex
@@ -93,17 +81,8 @@ func (s *Scanner) IsAvailable() bool {
 }
 
 // ShouldCheck returns true if this file type should be scanned by ClamAV
-// ClamAV handles non-image files; PhotoDNA handles images
 func (s *Scanner) ShouldCheck(mimeType string) bool {
-	if !s.IsAvailable() {
-		return false
-	}
-
-	// Normalize MIME type (remove charset, lowercase)
-	mimeType = strings.ToLower(strings.Split(mimeType, ";")[0])
-
-	// Skip image types - PhotoDNA handles those
-	return !imageMimeTypes[mimeType]
+	return s.IsAvailable()
 }
 
 // CheckFile scans file data for viruses using ClamAV's INSTREAM command

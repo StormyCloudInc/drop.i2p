@@ -19,12 +19,6 @@ type Config struct {
 	MLKEMSeed  string // Base64-encoded 64-byte seed
 	KeyVersion uint32 // Current key version (default: 1)
 
-	// PhotoDNA CSAM scanning
-	PhotoDNAAPIKey   string // Microsoft PhotoDNA API key
-	PhotoDNAEnabled  bool   // Enable/disable scanning (auto-enabled if API key present)
-	PhotoDNAFailOpen bool   // If true, allow uploads when API fails; if false, reject
-	PhotoDNATimeout  int    // API timeout in seconds
-
 	// ClamAV virus scanning
 	ClamAVEnabled  bool   // Enable/disable scanning (auto-enabled if clamd accessible)
 	ClamAVSocket   string // Unix socket path for clamd
@@ -49,18 +43,6 @@ func Load() *Config {
 		keyVersion = uint32(v)
 	}
 
-	// PhotoDNA: auto-enable if API key is present, unless explicitly disabled
-	photoDNAAPIKey := getEnv("SSP_PHOTODNA_API_KEY", "")
-	photoDNAEnabled := photoDNAAPIKey != ""
-	if e := getEnv("SSP_PHOTODNA_ENABLED", ""); e != "" {
-		photoDNAEnabled = e == "true" || e == "1"
-	}
-
-	photoDNATimeout := 10
-	if t, err := strconv.Atoi(getEnv("SSP_PHOTODNA_TIMEOUT", "10")); err == nil && t > 0 {
-		photoDNATimeout = t
-	}
-
 	// ClamAV: auto-enable by default (will check if clamd is accessible)
 	clamAVEnabled := true
 	if e := getEnv("SSP_CLAMAV_ENABLED", ""); e != "" {
@@ -82,12 +64,8 @@ func Load() *Config {
 		FlaskDebug:        getEnv("SSP_FLASK_DEBUG", "false") == "true",
 		X25519Seed:        getEnv("SSP_X25519_SEED", ""),
 		MLKEMSeed:         getEnv("SSP_MLKEM_SEED", ""),
-		KeyVersion:        keyVersion,
-		PhotoDNAAPIKey:    photoDNAAPIKey,
-		PhotoDNAEnabled:   photoDNAEnabled,
-		PhotoDNAFailOpen:  getEnv("SSP_PHOTODNA_FAIL_OPEN", "true") == "true",
-		PhotoDNATimeout:   photoDNATimeout,
-		ClamAVEnabled:     clamAVEnabled,
+		KeyVersion:    keyVersion,
+		ClamAVEnabled: clamAVEnabled,
 		ClamAVSocket:      getEnv("SSP_CLAMAV_SOCKET", "/var/run/clamav/clamd.sock"),
 		ClamAVHost:        getEnv("SSP_CLAMAV_HOST", "localhost:3310"),
 		ClamAVTimeout:     clamAVTimeout,

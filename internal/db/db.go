@@ -137,7 +137,6 @@ func createTables() error {
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('total_downloads', 0);
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('total_api_uploads', 0);
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('total_bytes_stored', 0);
-	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('photodna_blocked', 0);
 	INSERT OR IGNORE INTO stats(stat_key, stat_value) VALUES('clamav_blocked', 0);
 
 	-- Chunked uploads table for resumable uploads
