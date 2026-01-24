@@ -24,7 +24,8 @@ type File struct {
 	MetadataStripped  bool       `db:"metadata_stripped" json:"metadata_stripped"`
 	KEMCiphertext     []byte     `db:"kem_ciphertext" json:"-"`
 	KeyVersion        int        `db:"key_version" json:"-"`
-	EncryptionVersion int        `db:"encryption_version" json:"-"` // 1=legacy AES-GCM, 2=hybrid PQ
+	EncryptionVersion int        `db:"encryption_version" json:"-"` // 1=legacy AES-GCM, 2=hybrid PQ, 3=client-side E2EE
+	IsClientEncrypted bool       `db:"is_client_encrypted" json:"is_client_encrypted"`
 }
 
 // Chunk represents a part of a larger file

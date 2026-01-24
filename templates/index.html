@@ -115,33 +115,64 @@
 
                                     <div class="mb-6">
                                         <label class="mb-4">Advance Options</label>
-                                        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-                                            <label
-                                                style="display: flex; align-items: center; cursor: pointer; font-weight: normal;">
-                                                <input type="checkbox" name="keep_metadata" value="1"
-                                                    style="width: auto; margin-right: 0.5rem;">
-                                                Keep Metadata
+                                        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.85rem;">
+                                            <label style="display: flex; align-items: center; cursor: pointer; font-weight: normal; white-space: nowrap;">
+                                                <input type="checkbox" name="keep_metadata" value="1" style="width: auto; margin-right: 0.3rem;">
+                                                Metadata
                                             </label>
-                                            <label
-                                                style="display: flex; align-items: center; cursor: pointer; font-weight: normal;">
-                                                <input type="checkbox" id="toggle-password"
-                                                    style="width: auto; margin-right: 0.5rem;"
+                                            <label style="display: flex; align-items: center; cursor: pointer; font-weight: normal; white-space: nowrap;">
+                                                <input type="checkbox" id="toggle-password" style="width: auto; margin-right: 0.3rem;"
                                                     onchange="document.getElementById('password-field').style.display = this.checked ? 'block' : 'none'">
-                                                Password Protect
+                                                Password
                                             </label>
-                                            <label
-                                                style="display: flex; align-items: center; cursor: pointer; font-weight: normal; color: var(--primary);"
-                                                title="Recommended for files over 2MB">
-                                                <input type="checkbox" id="use-progress-bar"
-                                                    style="width: auto; margin-right: 0.5rem;"
+                                            <label style="display: flex; align-items: center; cursor: pointer; font-weight: normal; white-space: nowrap; color: var(--primary);"
+                                                title="Recommended for files over 2MB. Requires JavaScript.">
+                                                <input type="checkbox" id="use-progress-bar" style="width: auto; margin-right: 0.3rem;"
                                                     onchange="toggleProgressBarMode(this.checked)">
-                                                Advanced Upload <span style="font-size: 0.8em; color: var(--text-muted); margin-left: 0.25rem;">(for large files)</span>
+                                                Progress<span style="font-size: 0.8em; opacity: 0.7; margin-left: 0.25rem;">(JS)</span>
+                                            </label>
+                                            <label style="display: flex; align-items: center; cursor: pointer; font-weight: normal; white-space: nowrap; color: var(--secondary);"
+                                                title="Encrypt file in your browser before upload - server cannot decrypt. Requires JavaScript.">
+                                                <input type="checkbox" id="toggle-e2ee" style="width: auto; margin-right: 0.3rem;"
+                                                    onchange="toggleE2EE(this.checked)">
+                                                Client Encrypt<span style="font-size: 0.8em; opacity: 0.7; margin-left: 0.25rem;">(JS)</span>
                                             </label>
                                         </div>
 
                                         <div id="password-field" style="display: none; margin-top: 1rem;">
                                             <input type="password" name="password"
                                                 placeholder="Enter encryption password">
+                                        </div>
+
+                                        <!-- E2EE Key Panel -->
+                                        <div id="e2e-panel" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: var(--radius-sm); border: 1px solid var(--secondary);">
+                                            <div style="margin-bottom: 1rem;">
+                                                <label style="font-size: 0.9rem; color: var(--secondary);">Encryption Key</label>
+                                                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                                                    <input type="text" id="e2e-key" readonly
+                                                        style="font-family: monospace; font-size: 0.85rem; flex: 1;">
+                                                    <button type="button" onclick="copyE2EKey()" class="btn" style="padding: 0.4rem 0.8rem;">Copy</button>
+                                                    <button type="button" onclick="generateNewE2EKey()" class="btn" style="padding: 0.4rem 0.8rem;">New</button>
+                                                </div>
+                                            </div>
+
+                                            <div style="margin-bottom: 1rem;">
+                                                <label style="display: flex; align-items: center; cursor: pointer; font-weight: normal; font-size: 0.9rem;">
+                                                    <input type="checkbox" id="use-custom-key"
+                                                        style="width: auto; margin-right: 0.5rem;"
+                                                        onchange="toggleCustomKey(this.checked)">
+                                                    Use my own key
+                                                </label>
+                                                <input type="text" id="custom-key" style="display: none; margin-top: 0.5rem; font-family: monospace;"
+                                                    placeholder="Enter your 44-character base64 key"
+                                                    onchange="validateCustomKey(this.value)">
+                                            </div>
+
+                                            <div style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); padding: 0.75rem; border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--warning);">
+                                                <strong>Important:</strong> Save this key! It is generated and stored in your browser only.
+                                                The server cannot recover your file without it. Your filename is also encrypted.
+                                                <br><span style="opacity: 0.8;">Requires JavaScript to encrypt/decrypt.</span>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -366,9 +397,51 @@
     </div>
 
     <script>
+        console.log('[I2P Secure Share] JavaScript loaded');
+
+        // E2EE state
+        let e2eeEnabled = false;
+        let e2eeKey = null;
+        let e2eeLibLoaded = false;
+        let e2eeLibLoading = false;
+
+        // Lazy-load E2EE crypto library
+        function loadE2EELibrary() {
+            return new Promise((resolve, reject) => {
+                if (e2eeLibLoaded) {
+                    resolve();
+                    return;
+                }
+                if (e2eeLibLoading) {
+                    // Wait for existing load
+                    const checkLoaded = setInterval(() => {
+                        if (e2eeLibLoaded) {
+                            clearInterval(checkLoaded);
+                            resolve();
+                        }
+                    }, 50);
+                    return;
+                }
+                e2eeLibLoading = true;
+                const script = document.createElement('script');
+                script.src = '/static/js/crypto-e2ee-v2.js';
+                script.onload = () => {
+                    e2eeLibLoaded = true;
+                    e2eeLibLoading = false;
+                    resolve();
+                };
+                script.onerror = () => {
+                    e2eeLibLoading = false;
+                    reject(new Error('Failed to load E2EE library'));
+                };
+                document.head.appendChild(script);
+            });
+        }
+
         // Advanced Upload mode toggle
         let useProgressBar = false;
         function toggleProgressBarMode(enabled) {
+            console.log('[I2P Secure Share] Progress bar mode:', enabled);
             useProgressBar = enabled;
             const container = document.getElementById('upload-progress-container');
             if (!enabled) {
@@ -377,12 +450,109 @@
             }
         }
 
+        // E2EE functions
+        async function toggleE2EE(enabled) {
+            e2eeEnabled = enabled;
+            const panel = document.getElementById('e2e-panel');
+
+            if (enabled) {
+                // Load crypto library first
+                try {
+                    await loadE2EELibrary();
+                } catch (err) {
+                    alert('Failed to load encryption library: ' + err.message);
+                    document.getElementById('toggle-e2ee').checked = false;
+                    e2eeEnabled = false;
+                    return;
+                }
+
+                panel.style.display = 'block';
+                if (!e2eeKey) {
+                    generateNewE2EKey();
+                }
+
+                // E2EE requires progress bar mode
+                document.getElementById('use-progress-bar').checked = true;
+                toggleProgressBarMode(true);
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function generateNewE2EKey() {
+            if (!e2eeLibLoaded) return;
+            e2eeKey = E2EE.generateKey();
+            document.getElementById('e2e-key').value = E2EE.keyToString(e2eeKey);
+            document.getElementById('use-custom-key').checked = false;
+            document.getElementById('custom-key').style.display = 'none';
+        }
+
+        function copyE2EKey() {
+            const keyInput = document.getElementById('e2e-key');
+            keyInput.select();
+            document.execCommand('copy');
+
+            // Visual feedback
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = originalText, 1500);
+        }
+
+        function toggleCustomKey(enabled) {
+            const customKeyInput = document.getElementById('custom-key');
+            const generatedKeyInput = document.getElementById('e2e-key');
+            customKeyInput.style.display = enabled ? 'block' : 'none';
+
+            if (!enabled) {
+                // Switch back to generated key
+                if (e2eeKey && e2eeLibLoaded) {
+                    generatedKeyInput.value = E2EE.keyToString(e2eeKey);
+                }
+            }
+        }
+
+        function validateCustomKey(value) {
+            if (!e2eeLibLoaded) return;
+            try {
+                const customKey = E2EE.stringToKey(value.trim());
+                e2eeKey = customKey;
+                document.getElementById('e2e-key').value = E2EE.keyToString(customKey);
+            } catch (err) {
+                alert('Invalid key: ' + err.message);
+            }
+        }
+
+        function getE2EKey() {
+            if (document.getElementById('use-custom-key').checked) {
+                const customValue = document.getElementById('custom-key').value.trim();
+                if (customValue) {
+                    return E2EE.stringToKey(customValue);
+                }
+            }
+            return e2eeKey;
+        }
+
         const uploadForm = document.querySelector('#panel-file form');
 
+        console.log('[I2P Secure Share] Upload form found:', !!uploadForm);
         if (uploadForm) {
             uploadForm.addEventListener('submit', async (e) => {
+                console.log('[I2P Secure Share] Form submitted, useProgressBar:', useProgressBar, 'e2eeEnabled:', e2eeEnabled);
                 const fileInput = document.getElementById('file-input');
                 if (!fileInput.files.length) return;
+
+                // E2EE upload always uses special handling
+                if (e2eeEnabled) {
+                    e.preventDefault();
+                    const key = getE2EKey();
+                    if (!key) {
+                        alert('Please generate or enter an encryption key');
+                        return;
+                    }
+                    await uploadWithE2EE(fileInput.files[0], key);
+                    return;
+                }
 
                 // If multiple files selected, auto-create collection using main form settings
                 if (fileInput.files.length > 1) {
@@ -402,9 +572,8 @@
             });
         }
 
-        // Upload single file with progress bar
-        async function uploadSingleWithProgress(file) {
-            const formData = new FormData(uploadForm);
+        // Upload with client-side E2EE
+        async function uploadWithE2EE(file, key) {
             const progressBar = document.getElementById('upload-progress-bar');
             const progressStatus = document.getElementById('upload-status');
             const container = document.getElementById('upload-progress-container');
@@ -412,58 +581,209 @@
 
             container.classList.remove('hidden');
             submitBtn.disabled = true;
-            submitBtn.textContent = 'Uploading...';
+            submitBtn.textContent = 'Encrypting...';
 
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/api/upload', true);
+            try {
+                // Encrypt file client-side
+                progressStatus.textContent = 'Encrypting file...';
+                const encryptedBlob = await E2EE.encryptFile(file, key, (percent) => {
+                    progressBar.style.width = (percent * 0.5) + '%'; // 0-50% for encryption
+                    progressStatus.textContent = 'Encrypting: ' + Math.round(percent) + '%';
+                });
 
-            xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable) {
-                    const percent = Math.round((event.loaded / event.total) * 100);
-                    progressBar.style.width = percent + '%';
-                    progressStatus.textContent = percent + '% Uploaded';
+                // Upload encrypted file
+                progressStatus.textContent = 'Uploading encrypted file...';
+                const formData = new FormData();
+                formData.append('file', encryptedBlob, 'encrypted.bin');
+                formData.append('expiry', document.getElementById('file-expiry').value);
+                formData.append('client_encrypted', 'true');
+
+                // Optional max downloads
+                const maxDownloads = document.getElementById('max-downloads').value;
+                if (maxDownloads) {
+                    formData.append('max_downloads', maxDownloads);
                 }
-            };
 
-            xhr.onload = () => {
-                if (xhr.status === 200) {
-                    try {
-                        const res = JSON.parse(xhr.responseText);
-                        if (res.id) {
-                            progressStatus.textContent = 'Processing...';
-                            const viewUrl = '/view/' + res.id;
-                            const params = new URLSearchParams();
-                            params.set('flash', 'Upload Successful');
-                            params.set('flash_type', 'success');
-                            if (res.delete_token) {
-                                params.set('token', res.delete_token);
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/upload', true);
+
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable) {
+                        const percent = 50 + Math.round((event.loaded / event.total) * 50); // 50-100% for upload
+                        progressBar.style.width = percent + '%';
+                        progressStatus.textContent = 'Uploading: ' + (percent - 50) * 2 + '%';
+                    }
+                };
+
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const res = JSON.parse(xhr.responseText);
+                            if (res.id) {
+                                progressBar.style.width = '100%';
+                                progressStatus.textContent = 'Upload complete!';
+
+                                // Redirect with key in hash (not sent to server)
+                                const keyStr = E2EE.keyToString(key);
+                                const viewUrl = '/view/' + res.id;
+                                const params = new URLSearchParams();
+                                params.set('flash', 'E2EE Upload Successful! Save your key: ' + keyStr);
+                                params.set('flash_type', 'success');
+                                if (res.delete_token) {
+                                    params.set('token', res.delete_token);
+                                }
+                                window.location.href = viewUrl + '?' + params.toString() + '#key=' + keyStr;
+                            } else {
+                                throw new Error('Invalid response');
                             }
-                            window.location.href = viewUrl + '?' + params.toString();
-                        } else {
-                            throw new Error('Invalid response');
+                        } catch (err) {
+                            alert('Upload failed: Invalid server response');
+                            resetUploadUI();
                         }
-                    } catch (err) {
-                        alert('Upload failed: Invalid server response');
+                    } else {
+                        try {
+                            const errRes = JSON.parse(xhr.responseText);
+                            alert('Upload failed: ' + (errRes.error || xhr.statusText));
+                        } catch {
+                            alert('Upload failed: ' + xhr.statusText);
+                        }
                         resetUploadUI();
                     }
-                } else {
-                    alert('Upload failed: ' + xhr.statusText);
+                };
+
+                xhr.onerror = () => {
+                    alert('Upload failed: Network error');
                     resetUploadUI();
-                }
-            };
+                };
 
-            xhr.onerror = () => {
-                alert('Upload failed: Network error');
+                xhr.send(formData);
+
+            } catch (err) {
+                alert('Encryption failed: ' + err.message);
                 resetUploadUI();
-            };
-
-            xhr.send(formData);
+            }
 
             function resetUploadUI() {
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Encrypted Upload';
                 container.classList.add('hidden');
                 progressBar.style.width = '0%';
+            }
+        }
+
+        // Upload single file with progress bar using chunked upload API
+        async function uploadSingleWithProgress(file) {
+            console.log('[I2P Secure Share] uploadSingleWithProgress called for:', file.name, 'size:', file.size);
+            const progressBar = document.getElementById('upload-progress-bar');
+            const progressStatus = document.getElementById('upload-status');
+            const container = document.getElementById('upload-progress-container');
+            const submitBtn = uploadForm.querySelector('button[type="submit"]');
+
+            container.classList.remove('hidden');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Initializing...';
+
+            const CHUNK_SIZE = 256 * 1024; // 256KB chunks (matches server storage chunk size)
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+            // Get form values
+            const expiry = document.getElementById('file-expiry').value;
+            const passwordEnabled = document.getElementById('toggle-password').checked;
+            const password = passwordEnabled ? document.querySelector('#password-field input').value : '';
+            const maxDownloadsStr = document.getElementById('max-downloads').value;
+            const keepMetadata = document.querySelector('input[name="keep_metadata"]').checked;
+
+            function resetUploadUI() {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Encrypted Upload';
+                container.classList.add('hidden');
+                progressBar.style.width = '0%';
+            }
+
+            try {
+                // Step 1: Initialize chunked upload
+                progressStatus.textContent = 'Initializing upload...';
+                const initResponse = await fetch('/api/upload/chunked/init', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: file.name,
+                        mime_type: file.type || 'application/octet-stream',
+                        total_size: file.size,
+                        total_chunks: totalChunks,
+                        expiry: expiry,
+                        password: password,
+                        max_downloads: maxDownloadsStr ? parseInt(maxDownloadsStr) : null,
+                        keep_metadata: keepMetadata
+                    })
+                });
+
+                if (!initResponse.ok) {
+                    const errData = await initResponse.json().catch(() => ({}));
+                    throw new Error(errData.error || 'Failed to initialize upload');
+                }
+
+                const initData = await initResponse.json();
+                const uploadId = initData.upload_id;
+                console.log('[I2P Secure Share] Upload initialized:', uploadId, 'chunks:', totalChunks);
+
+                // Step 2: Upload chunks sequentially
+                submitBtn.textContent = 'Uploading...';
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, file.size);
+                    const chunk = file.slice(start, end);
+
+                    const percent = Math.round((i / totalChunks) * 100);
+                    progressBar.style.width = percent + '%';
+                    progressStatus.textContent = `Uploading chunk ${i + 1}/${totalChunks} (${percent}%)`;
+
+                    const chunkResponse = await fetch(`/api/upload/chunked/${uploadId}/${i}`, {
+                        method: 'POST',
+                        body: chunk
+                    });
+
+                    if (!chunkResponse.ok) {
+                        const errData = await chunkResponse.json().catch(() => ({}));
+                        throw new Error(errData.error || `Failed to upload chunk ${i + 1}`);
+                    }
+
+                    const chunkData = await chunkResponse.json();
+                    console.log('[I2P Secure Share] Chunk', i + 1, 'uploaded, received:', chunkData.received_chunks);
+                }
+
+                // Step 3: Complete the upload
+                progressBar.style.width = '100%';
+                progressStatus.textContent = 'Finalizing upload...';
+                submitBtn.textContent = 'Finalizing...';
+
+                const completeResponse = await fetch(`/api/upload/chunked/${uploadId}/complete`, {
+                    method: 'POST'
+                });
+
+                if (!completeResponse.ok) {
+                    const errData = await completeResponse.json().catch(() => ({}));
+                    throw new Error(errData.error || 'Failed to finalize upload');
+                }
+
+                const result = await completeResponse.json();
+                console.log('[I2P Secure Share] Upload complete:', result);
+
+                // Redirect to view page
+                progressStatus.textContent = 'Upload complete!';
+                const viewUrl = '/view/' + result.id;
+                const params = new URLSearchParams();
+                params.set('flash', 'Upload Successful');
+                params.set('flash_type', 'success');
+                if (result.delete_token) {
+                    params.set('token', result.delete_token);
+                }
+                window.location.href = viewUrl + '?' + params.toString();
+
+            } catch (error) {
+                console.error('[I2P Secure Share] Upload error:', error);
+                alert('Upload failed: ' + error.message);
+                resetUploadUI();
             }
         }
 

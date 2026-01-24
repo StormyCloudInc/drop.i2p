@@ -8,6 +8,7 @@ import (
 
 	"drop-i2p/internal/clamav"
 	"drop-i2p/internal/config"
+	"drop-i2p/internal/crypto"
 	"drop-i2p/internal/db"
 	"drop-i2p/internal/server"
 	"drop-i2p/internal/storage"
@@ -23,8 +24,19 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize storage manager
-	store := storage.NewManager(cfg)
+	// Initialize storage manager with hybrid PQ encryption if keys are configured
+	var store *storage.Manager
+	if cfg.HasHybridKeys() {
+		km, err := crypto.NewKeyManager(cfg.X25519Seed, cfg.MLKEMSeed, uint32(cfg.KeyVersion))
+		if err != nil {
+			log.Fatalf("Failed to initialize hybrid encryption keys: %v", err)
+		}
+		store = storage.NewManagerWithKeys(cfg, km)
+		log.Printf("Hybrid PQ encryption enabled (key version %d)", cfg.KeyVersion)
+	} else {
+		store = storage.NewManager(cfg)
+		log.Printf("Using legacy AES encryption (no hybrid keys configured)")
+	}
 
 	// Initialize ClamAV scanner and attach to storage manager for chunked uploads
 	clamAVScanner := clamav.NewScanner(cfg)
@@ -45,9 +57,13 @@ func main() {
 }
 
 // startBackgroundTasks runs periodic background tasks:
+// - Cleanup expired files every 15 minutes
 // - Hourly stats snapshots for analytics
 // - Storage threshold monitoring for webhooks
 func startBackgroundTasks(cfg *config.Config, store *storage.Manager, notifier *webhook.Notifier) {
+	// Cleanup ticker (every 15 minutes)
+	cleanupTicker := time.NewTicker(15 * time.Minute)
+
 	// Stats snapshot ticker (hourly)
 	statsTicker := time.NewTicker(1 * time.Hour)
 
@@ -69,8 +85,15 @@ func startBackgroundTasks(cfg *config.Config, store *storage.Manager, notifier *
 		log.Printf("[background] Recorded initial stats snapshot")
 	}
 
+	// Run initial cleanup on startup
+	store.CleanupExpired()
+
 	for {
 		select {
+		case <-cleanupTicker.C:
+			// Cleanup expired files and orphans
+			store.CleanupExpired()
+
 		case <-statsTicker.C:
 			// Record stats snapshot for analytics
 			if err := store.RecordStatsSnapshot(); err != nil {

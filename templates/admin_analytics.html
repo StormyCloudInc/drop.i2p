@@ -7,7 +7,7 @@
     <title>Admin - Analytics - I2P Secure Share</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/js/chart.min.js"></script>
 </head>
 
 <body>
@@ -78,40 +78,34 @@
                         <canvas id="fileTypeChart" height="200"></canvas>
                     </div>
 
-                    <!-- Top Uploaders -->
+                    <!-- File Security & Expiration Overview -->
                     <div class="glass-panel" style="padding: 1.5rem;">
-                        <h3 style="margin-bottom: 1rem;">Top Uploaders</h3>
-                        {{if .TopUploaders}}
-                        <div style="overflow-x: auto;">
-                            <table class="data-table" style="font-size: 0.85rem;">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Destination</th>
-                                        <th>Files</th>
-                                        <th>Size</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {{range $i, $u := .TopUploaders}}
-                                    <tr>
-                                        <td>{{inc $i}}</td>
-                                        <td>
-                                            <span class="text-truncate" style="max-width: 200px; display: inline-block;"
-                                                title="{{$u.Destination}}">
-                                                {{truncate $u.Destination 20}}
-                                            </span>
-                                        </td>
-                                        <td>{{$u.FileCount}}</td>
-                                        <td>{{formatBytes $u.TotalBytes}}</td>
-                                    </tr>
-                                    {{end}}
-                                </tbody>
-                            </table>
+                        <h3 style="margin-bottom: 1rem;">File Overview</h3>
+                        {{if .ExtendedStats}}
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div style="background: rgba(56, 189, 248, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary);">{{.ExtendedStats.E2EEFiles}}</div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">E2EE Encrypted</div>
+                            </div>
+                            <div style="background: rgba(168, 85, 247, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #a855f7;">{{.ExtendedStats.PasswordProtected}}</div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Password Protected</div>
+                            </div>
+                            <div style="background: rgba(34, 197, 94, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: var(--success);">{{.ExtendedStats.PermanentFiles}}</div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Permanent Files</div>
+                            </div>
+                            <div style="background: rgba(251, 191, 36, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning);">{{.ExtendedStats.ExpiringIn24h}}</div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Expiring in 24h</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 1rem; padding: 0.75rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px; text-align: center;">
+                            <span style="color: var(--text-muted); font-size: 0.85rem;">Expiring in 7 days:</span>
+                            <span style="color: var(--error); font-weight: bold; margin-left: 0.5rem;">{{.ExtendedStats.ExpiringIn7d}}</span>
                         </div>
                         {{else}}
-                        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">No uploader data
-                            available.</p>
+                        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">No data available.</p>
                         {{end}}
                     </div>
 

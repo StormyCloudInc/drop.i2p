@@ -10,6 +10,7 @@ import (
 	"drop-i2p/internal/clamav"
 	"drop-i2p/internal/config"
 	"drop-i2p/internal/i2p"
+	"drop-i2p/internal/imaging"
 	"drop-i2p/internal/metadata"
 	mw "drop-i2p/internal/middleware"
 	"drop-i2p/internal/storage"
@@ -96,6 +97,7 @@ type Server struct {
 	clamAV       *clamav.Scanner
 	webhook      *webhook.Notifier
 	announcement *AnnouncementReader
+	imageProc    *imaging.Processor
 }
 
 func New(cfg *config.Config, store *storage.Manager) *Server {
@@ -118,6 +120,9 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 	announcementReader := NewAnnouncementReader(cfg.AnnouncementFile)
 	announcementReader.StartAutoRefresh(30 * time.Second)
 
+	// Initialize image processor (converts images to WebP for I2P bandwidth savings)
+	imageProcessor := imaging.NewProcessor(imaging.DefaultConfig())
+
 	return &Server{
 		cfg:          cfg,
 		store:        store,
@@ -127,6 +132,7 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 		clamAV:       clamAVScanner,
 		webhook:      webhookNotifier,
 		announcement: announcementReader,
+		imageProc:    imageProcessor,
 	}
 }
 

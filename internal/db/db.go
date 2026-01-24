@@ -28,7 +28,24 @@ func Init(dataSourceName string) error {
 		return err
 	}
 
-	return createTables()
+	if err = createTables(); err != nil {
+		return err
+	}
+
+	return runMigrations()
+}
+
+// runMigrations adds missing columns to existing databases
+func runMigrations() error {
+	// Add is_client_encrypted column if missing (for E2EE support)
+	_, err := DB.Exec(`ALTER TABLE files ADD COLUMN is_client_encrypted BOOLEAN DEFAULT 0`)
+	if err != nil && err.Error() != "SQL logic error: duplicate column name: is_client_encrypted (1)" {
+		// Ignore "duplicate column" error, it means column already exists
+		if err.Error() != "duplicate column name: is_client_encrypted" {
+			// Only log unexpected errors, duplicate column is expected
+		}
+	}
+	return nil
 }
 
 func createTables() error {
@@ -53,7 +70,8 @@ func createTables() error {
 		metadata_stripped INTEGER DEFAULT 1,
 		kem_ciphertext BLOB,
 		key_version INTEGER DEFAULT 0,
-		encryption_version INTEGER DEFAULT 2
+		encryption_version INTEGER DEFAULT 2,
+		is_client_encrypted BOOLEAN DEFAULT 0
 	);
 	CREATE INDEX IF NOT EXISTS idx_expiry ON files(expiry_time);
 	CREATE INDEX IF NOT EXISTS idx_token ON files(delete_token);

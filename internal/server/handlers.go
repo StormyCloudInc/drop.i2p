@@ -70,6 +70,39 @@ var templates = template.Must(template.New("").Funcs(templateFuncs).ParseFiles(
 	"templates/message.html",
 ))
 
+// canDisplayInline returns true if the MIME type is safe to display in browser
+// This allows images, videos, audio, and PDFs to render inline instead of downloading
+func canDisplayInline(mimeType string) bool {
+	mt := strings.ToLower(mimeType)
+
+	// Images (except SVG which can contain scripts)
+	if strings.HasPrefix(mt, "image/") && mt != "image/svg+xml" {
+		return true
+	}
+
+	// Video
+	if strings.HasPrefix(mt, "video/") {
+		return true
+	}
+
+	// Audio
+	if strings.HasPrefix(mt, "audio/") {
+		return true
+	}
+
+	// PDF
+	if mt == "application/pdf" {
+		return true
+	}
+
+	// Plain text
+	if mt == "text/plain" {
+		return true
+	}
+
+	return false
+}
+
 // highlightCode applies syntax highlighting to code using Chroma
 // Returns HTML with inline styles (no external CSS needed)
 func highlightCode(code, language string) template.HTML {
@@ -220,6 +253,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	keepMetadata := r.FormValue("keep_metadata") == "on" || r.FormValue("keep_metadata") == "true"
 	opts.MetadataStripped = !keepMetadata
 
+	// Check for client-side encryption (E2EE)
+	isClientEncrypted := r.FormValue("client_encrypted") == "true" || r.FormValue("client_encrypted") == "on"
+	opts.IsClientEncrypted = isClientEncrypted
+
 	// Handle password protection
 	password := r.FormValue("password")
 	if password != "" {
@@ -250,8 +287,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ClamAV virus scan (before encryption/storage)
-	if s.clamAV.ShouldCheck(mimeType) {
+	// ClamAV virus scan (before encryption/storage) - skip for client-encrypted files
+	if !isClientEncrypted && s.clamAV.ShouldCheck(mimeType) {
 		if infected, threat, _ := s.clamAV.CheckFile(r.Context(), fileData); infected {
 			s.store.IncrementStat("clamav_blocked")
 			renderMessage(w, http.StatusForbidden, "error", "Upload Blocked", fmt.Sprintf("File contains malware: %s", threat))
@@ -259,10 +296,28 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Convert images to compressed JPEG for bandwidth savings (skip for client-encrypted files)
+	filename := header.Filename
+	if !isClientEncrypted && s.imageProc.CanProcess(mimeType) {
+		convertedData, newFilename, newMimeType, err := s.imageProc.Process(fileData, filename, mimeType)
+		if err == nil && len(convertedData) > 0 && len(convertedData) < len(fileData) {
+			fileData = convertedData
+			filename = newFilename
+			mimeType = newMimeType
+		}
+	}
+
 	var fileReader io.Reader = bytes.NewReader(fileData)
 
-	// Save File
-	savedFile, err := s.store.SaveFile(fileID, fileReader, header.Filename, mimeType, expiryTime, deleteToken, uploaderDest, opts)
+	// Save File - use raw storage for client-encrypted files
+	var savedFile *models.File
+	if isClientEncrypted {
+		// For client-encrypted files, use placeholder filename (real name is encrypted in file header)
+		placeholderFilename := fileID[:8] + ".encrypted"
+		savedFile, err = s.store.SaveFileRaw(fileID, fileReader, placeholderFilename, "application/octet-stream", expiryTime, deleteToken, uploaderDest, opts)
+	} else {
+		savedFile, err = s.store.SaveFile(fileID, fileReader, filename, mimeType, expiryTime, deleteToken, uploaderDest, opts)
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to save file: %v", err), http.StatusInternalServerError)
 		return
@@ -296,14 +351,14 @@ func (s *Server) handleViewFile(w http.ResponseWriter, r *http.Request) {
 
 	file, err := s.store.GetFileMetadata(fileID)
 	if err != nil {
-		renderError(w, http.StatusNotFound, "&#x1F50D;", "File Not Found",
+		renderError(w, http.StatusNotFound, "🔍", "File Not Found",
 			"The file you're looking for doesn't exist or has been deleted.",
 			"It may have expired or been removed by the uploader.")
 		return
 	}
 
 	if file.IsBlocked {
-		renderError(w, http.StatusForbidden, "&#x1F6AB;", "File Unavailable",
+		renderError(w, http.StatusForbidden, "🚫", "File Unavailable",
 			"This file has been blocked and is no longer available.",
 			"It was removed for violating our terms of service.")
 		return
@@ -471,7 +526,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	file, err := s.store.GetFileMetadata(fileID)
 	if err != nil {
-		renderError(w, http.StatusNotFound, "&#x1F50D;", "File Not Found",
+		renderError(w, http.StatusNotFound, "🔍", "File Not Found",
 			"The file you're looking for doesn't exist or has been deleted.",
 			"It may have expired or been removed by the uploader.")
 		return
@@ -479,7 +534,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// Check if file is blocked
 	if file.IsBlocked {
-		renderError(w, http.StatusForbidden, "&#x1F6AB;", "File Unavailable",
+		renderError(w, http.StatusForbidden, "🚫", "File Unavailable",
 			"This file has been blocked and is no longer available.",
 			"It was removed for violating our terms of service.")
 		return
@@ -519,8 +574,6 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set common headers
-	// Force download to prevent XSS
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", file.Filename))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	// Downgrade dangerous content types to application/octet-stream
@@ -529,11 +582,18 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		mimeType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", mimeType)
+
+	// Set Content-Disposition: inline for displayable types, attachment for others
+	disposition := "attachment"
+	if canDisplayInline(mimeType) {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, file.Filename))
 	w.Header().Set("Accept-Ranges", "bytes")
 
-	// Check for Range header (resumable downloads)
+	// Check for Range header (resumable downloads) - not supported for client-encrypted files
 	rangeHeader := r.Header.Get("Range")
-	if rangeHeader != "" {
+	if rangeHeader != "" && !file.IsClientEncrypted {
 		s.handleRangeDownload(w, r, file, rangeHeader)
 		return
 	}
@@ -544,6 +604,14 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// Full download
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+
+	// For client-encrypted files, stream raw bytes (no server decryption)
+	if file.IsClientEncrypted {
+		if err := s.store.RetrieveFileRaw(fileID, w); err != nil {
+			fmt.Printf("Error streaming raw file: %v\n", err)
+		}
+		return
+	}
 
 	if err := s.store.RetrieveFile(fileID, w); err != nil {
 		fmt.Printf("Error streaming file: %v\n", err)
@@ -729,7 +797,9 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	adminFiles := make([]AdminFileView, len(files))
 	for i, f := range files {
 		encType := "Legacy AES"
-		if f.EncryptionVersion == 2 {
+		if f.IsClientEncrypted {
+			encType = "E2EE"
+		} else if f.EncryptionVersion == 2 {
 			encType = "Hybrid PQ"
 		}
 		adminFiles[i] = AdminFileView{
@@ -1042,7 +1112,7 @@ func (s *Server) handleViewPaste(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if paste.IsBlocked {
-		renderError(w, http.StatusForbidden, "&#x1F6AB;", "Paste Unavailable",
+		renderError(w, http.StatusForbidden, "🚫", "Paste Unavailable",
 			"This paste has been blocked and is no longer available.",
 			"It was removed for violating our terms of service.")
 		return
@@ -1126,7 +1196,7 @@ func (s *Server) handleRawPaste(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if paste.IsBlocked {
-		renderError(w, http.StatusForbidden, "&#x1F6AB;", "Paste Unavailable",
+		renderError(w, http.StatusForbidden, "🚫", "Paste Unavailable",
 			"This paste has been blocked and is no longer available.",
 			"It was removed for violating our terms of service.")
 		return
@@ -1253,11 +1323,15 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	fileID := uuid.New().String()
 	deleteToken := uuid.New().String()
 
+	// Check for client-side encryption (E2EE)
+	isClientEncrypted := r.FormValue("client_encrypted") == "true" || r.FormValue("client_encrypted") == "1"
+
 	// Prepare upload options
 	opts := &storage.UploadOptions{
-		PasswordHash:     passwordHash,
-		MaxDownloads:     maxDownloads,
-		MetadataStripped: !keepMetadata,
+		PasswordHash:      passwordHash,
+		MaxDownloads:      maxDownloads,
+		MetadataStripped:  !keepMetadata,
+		IsClientEncrypted: isClientEncrypted,
 	}
 
 	// Read file data for scanning
@@ -1269,8 +1343,8 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ClamAV virus scan (before encryption/storage)
-	if s.clamAV.ShouldCheck(mimeType) {
+	// ClamAV virus scan (before encryption/storage) - skip for client-encrypted files
+	if !isClientEncrypted && s.clamAV.ShouldCheck(mimeType) {
 		if infected, threat, _ := s.clamAV.CheckFile(r.Context(), fileData); infected {
 			s.store.IncrementStat("clamav_blocked")
 			w.Header().Set("Content-Type", "application/json")
@@ -1282,7 +1356,15 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 
 	var fileReader io.Reader = bytes.NewReader(fileData)
 
-	savedFile, err := s.store.SaveFile(fileID, fileReader, header.Filename, mimeType, expiryTime, deleteToken, uploaderDest, opts)
+	// Save File - use raw storage for client-encrypted files
+	var savedFile *models.File
+	if isClientEncrypted {
+		// For client-encrypted files, use placeholder filename (real name is encrypted in file header)
+		placeholderFilename := fileID[:8] + ".encrypted"
+		savedFile, err = s.store.SaveFileRaw(fileID, fileReader, placeholderFilename, "application/octet-stream", expiryTime, deleteToken, uploaderDest, opts)
+	} else {
+		savedFile, err = s.store.SaveFile(fileID, fileReader, header.Filename, mimeType, expiryTime, deleteToken, uploaderDest, opts)
+	}
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1295,12 +1377,13 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":           savedFile.ID,
-		"url":          fmt.Sprintf("/f/%s", savedFile.ID),
-		"delete_url":   fmt.Sprintf("/d/%s/%s", savedFile.ID, deleteToken),
-		"delete_token": deleteToken,
-		"size":         savedFile.Size,
-		"filename":     savedFile.Filename,
+		"id":               savedFile.ID,
+		"url":              fmt.Sprintf("/f/%s", savedFile.ID),
+		"delete_url":       fmt.Sprintf("/d/%s/%s", savedFile.ID, deleteToken),
+		"delete_token":     deleteToken,
+		"size":             savedFile.Size,
+		"filename":         savedFile.Filename,
+		"client_encrypted": savedFile.IsClientEncrypted,
 	})
 }
 
@@ -1717,8 +1800,8 @@ func (s *Server) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
 	// Get stats history (last 30 days)
 	history, _ := s.store.GetStatsHistory(30)
 
-	// Get top uploaders
-	topUploaders, _ := s.store.GetTopUploaders(10)
+	// Get extended stats (E2EE, password protected, expiring)
+	extendedStats, _ := s.store.GetExtendedStats()
 
 	// Get file type distribution
 	fileTypes, _ := s.store.GetFileTypeDistribution()
@@ -1727,12 +1810,12 @@ func (s *Server) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
 	currentBytes := s.store.GetTotalBytesStored()
 
 	data := map[string]interface{}{
-		"Stats":        stats,
-		"History":      history,
-		"TopUploaders": topUploaders,
-		"FileTypes":    fileTypes,
-		"CurrentBytes": currentBytes,
-		"AdminURL":     s.cfg.AdminURL,
+		"Stats":         stats,
+		"History":       history,
+		"ExtendedStats": extendedStats,
+		"FileTypes":     fileTypes,
+		"CurrentBytes":  currentBytes,
+		"AdminURL":      s.cfg.AdminURL,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

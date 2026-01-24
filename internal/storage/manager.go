@@ -27,15 +27,17 @@ const ChunkSize = 256 * 1024 // 256KB chunks - optimized for I2P retry economics
 
 // Encryption version constants
 const (
-	EncryptionVersionLegacy = 1 // Legacy AES-GCM with static key
-	EncryptionVersionHybrid = 2 // Hybrid X25519 + ML-KEM-768 with XChaCha20-Poly1305
+	EncryptionVersionLegacy    = 1 // Legacy AES-GCM with static key
+	EncryptionVersionHybrid    = 2 // Hybrid X25519 + ML-KEM-768 with XChaCha20-Poly1305
+	EncryptionVersionClientE2E = 3 // Client-side E2EE (server stores raw encrypted bytes)
 )
 
 // UploadOptions contains optional file upload settings
 type UploadOptions struct {
-	PasswordHash     string
-	MaxDownloads     *int
-	MetadataStripped bool
+	PasswordHash      string
+	MaxDownloads      *int
+	MetadataStripped  bool
+	IsClientEncrypted bool // True if file was encrypted client-side (E2EE)
 }
 
 // ClamAVChecker interface for virus/malware scanning
@@ -207,6 +209,134 @@ func (m *Manager) SaveFile(fileID string, reader io.Reader, filename, mimeType s
 		KeyVersion:        keyVersion,
 		EncryptionVersion: encryptionVersion,
 	}, nil
+}
+
+// SaveFileRaw stores pre-encrypted (client-side E2EE) file without server-side encryption.
+// The file is stored as-is in chunks, with no server-side encryption applied.
+func (m *Manager) SaveFileRaw(fileID string, reader io.Reader, filename, mimeType string, expiryTime *time.Time, deleteToken, uploaderDest string, opts *UploadOptions) (*models.File, error) {
+	if opts == nil {
+		opts = &UploadOptions{MetadataStripped: false, IsClientEncrypted: true}
+	}
+
+	// Create upload dir if not exists
+	if err := os.MkdirAll(m.cfg.UploadFolder, 0700); err != nil {
+		return nil, err
+	}
+
+	buf := make([]byte, ChunkSize)
+	chunkIndex := 0
+	totalSize := int64(0)
+
+	// Content hash of the encrypted data (for deduplication of encrypted blobs)
+	var contentHasher hash.Hash = sha256.New()
+
+	// Begin Transaction
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	for {
+		n, err := io.ReadFull(reader, buf)
+		if n > 0 {
+			// Update content hash with encrypted data
+			contentHasher.Write(buf[:n])
+
+			// Compute chunk checksum
+			chunkHash := sha256.Sum256(buf[:n])
+			chunkChecksum := hex.EncodeToString(chunkHash[:])
+
+			// Save chunk directly without server-side encryption
+			chunkUUID := uuid.New().String()
+			chunkPath := filepath.Join(m.cfg.UploadFolder, chunkUUID)
+			if err := os.WriteFile(chunkPath, buf[:n], 0600); err != nil {
+				return nil, err
+			}
+
+			// Record chunk in DB with size and checksum
+			_, err = tx.Exec("INSERT INTO chunks (file_id, chunk_index, chunk_path, chunk_size, checksum) VALUES (?, ?, ?, ?, ?)",
+				fileID, chunkIndex, chunkUUID, n, chunkChecksum)
+			if err != nil {
+				return nil, err
+			}
+
+			totalSize += int64(n)
+			chunkIndex++
+		}
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	contentHash := hex.EncodeToString(contentHasher.Sum(nil))
+
+	// Insert File Record - mark as client-encrypted with encryption_version=3
+	_, err = tx.Exec(`
+		INSERT INTO files (id, filename, original_filename, size, mime_type, content_hash, expiry_time, delete_token, is_encrypted, uploader_dest, password_hash, max_downloads, metadata_stripped, encryption_version, is_client_encrypted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, fileID, filename, filename, totalSize, mimeType, contentHash, expiryTime, deleteToken, true, uploaderDest, opts.PasswordHash, opts.MaxDownloads, opts.MetadataStripped, EncryptionVersionClientE2E, true)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	// Update stats
+	m.IncrementStat("total_files")
+	m.IncrementStatByAmount("total_bytes_stored", totalSize)
+
+	return &models.File{
+		ID:                fileID,
+		Filename:          filename,
+		OriginalFilename:  filename,
+		Size:              totalSize,
+		MimeType:          mimeType,
+		ContentHash:       contentHash,
+		ExpiryTime:        expiryTime,
+		DeleteToken:       deleteToken,
+		UploaderDest:      uploaderDest,
+		IsEncrypted:       true,
+		PasswordHash:      opts.PasswordHash,
+		MaxDownloads:      opts.MaxDownloads,
+		MetadataStripped:  opts.MetadataStripped,
+		EncryptionVersion: EncryptionVersionClientE2E,
+		IsClientEncrypted: true,
+	}, nil
+}
+
+// RetrieveFileRaw streams raw file content without any decryption (for client-side E2EE files).
+func (m *Manager) RetrieveFileRaw(fileID string, writer io.Writer) error {
+	// Get chunks
+	rows, err := db.DB.Query("SELECT chunk_path FROM chunks WHERE file_id = ? ORDER BY chunk_index ASC", fileID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var chunkPathRelative string
+		if err := rows.Scan(&chunkPathRelative); err != nil {
+			return err
+		}
+
+		chunkPath := filepath.Join(m.cfg.UploadFolder, chunkPathRelative)
+		data, err := os.ReadFile(chunkPath)
+		if err != nil {
+			return err
+		}
+
+		if _, err := writer.Write(data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RetrieveFile streams the decrypted file content
@@ -453,7 +583,8 @@ func (m *Manager) GetFileMetadata(id string) (*models.File, error) {
 		       COALESCE(content_hash, ''), upload_time, expiry_time, delete_token,
 		       is_encrypted, COALESCE(is_blocked, 0), COALESCE(uploader_dest, ''), download_count,
 		       COALESCE(password_hash, ''), max_downloads, COALESCE(metadata_stripped, 1),
-		       kem_ciphertext, COALESCE(key_version, 0), COALESCE(encryption_version, 1)
+		       kem_ciphertext, COALESCE(key_version, 0), COALESCE(encryption_version, 1),
+		       COALESCE(is_client_encrypted, 0)
 		FROM files WHERE id = ?`, id)
 
 	var f models.File
@@ -461,7 +592,8 @@ func (m *Manager) GetFileMetadata(id string) (*models.File, error) {
 		&f.ContentHash, &f.UploadTime, &f.ExpiryTime, &f.DeleteToken,
 		&f.IsEncrypted, &f.IsBlocked, &f.UploaderDest, &f.DownloadCount,
 		&f.PasswordHash, &f.MaxDownloads, &f.MetadataStripped,
-		&f.KEMCiphertext, &f.KeyVersion, &f.EncryptionVersion); err != nil {
+		&f.KEMCiphertext, &f.KeyVersion, &f.EncryptionVersion,
+		&f.IsClientEncrypted); err != nil {
 		return nil, err
 	}
 	return &f, nil
@@ -473,7 +605,7 @@ func (m *Manager) ListFiles(limit int) ([]*models.File, error) {
 		SELECT id, filename, COALESCE(original_filename, filename), size, mime_type,
 		       COALESCE(content_hash, ''), upload_time, expiry_time, is_encrypted,
 		       COALESCE(is_blocked, 0), COALESCE(uploader_dest, ''), download_count,
-		       COALESCE(encryption_version, 1)
+		       COALESCE(encryption_version, 1), COALESCE(is_client_encrypted, 0)
 		FROM files ORDER BY upload_time DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -485,7 +617,8 @@ func (m *Manager) ListFiles(limit int) ([]*models.File, error) {
 		var f models.File
 		if err := rows.Scan(&f.ID, &f.Filename, &f.OriginalFilename, &f.Size, &f.MimeType,
 			&f.ContentHash, &f.UploadTime, &f.ExpiryTime, &f.IsEncrypted,
-			&f.IsBlocked, &f.UploaderDest, &f.DownloadCount, &f.EncryptionVersion); err == nil {
+			&f.IsBlocked, &f.UploaderDest, &f.DownloadCount, &f.EncryptionVersion,
+			&f.IsClientEncrypted); err == nil {
 			files = append(files, &f)
 		}
 	}
@@ -986,6 +1119,37 @@ func (m *Manager) CleanupOldStatsHistory(days int) error {
 	return err
 }
 
+// ExtendedStats contains additional analytics data
+type ExtendedStats struct {
+	E2EEFiles         int
+	PasswordProtected int
+	PermanentFiles    int
+	ExpiringIn24h     int
+	ExpiringIn7d      int
+}
+
+// GetExtendedStats returns additional analytics data
+func (m *Manager) GetExtendedStats() (*ExtendedStats, error) {
+	stats := &ExtendedStats{}
+
+	// E2EE files count
+	db.DB.QueryRow(`SELECT COUNT(*) FROM files WHERE is_client_encrypted = 1 AND is_blocked = 0`).Scan(&stats.E2EEFiles)
+
+	// Password protected files
+	db.DB.QueryRow(`SELECT COUNT(*) FROM files WHERE password_hash IS NOT NULL AND password_hash != '' AND is_blocked = 0`).Scan(&stats.PasswordProtected)
+
+	// Permanent files (no expiry)
+	db.DB.QueryRow(`SELECT COUNT(*) FROM files WHERE expiry_time IS NULL AND is_blocked = 0`).Scan(&stats.PermanentFiles)
+
+	// Expiring in 24 hours
+	db.DB.QueryRow(`SELECT COUNT(*) FROM files WHERE expiry_time IS NOT NULL AND expiry_time < datetime('now', '+1 day') AND expiry_time > datetime('now') AND is_blocked = 0`).Scan(&stats.ExpiringIn24h)
+
+	// Expiring in 7 days
+	db.DB.QueryRow(`SELECT COUNT(*) FROM files WHERE expiry_time IS NOT NULL AND expiry_time < datetime('now', '+7 days') AND expiry_time > datetime('now') AND is_blocked = 0`).Scan(&stats.ExpiringIn7d)
+
+	return stats, nil
+}
+
 // ========== Collection Methods ==========
 
 // CreateCollection creates a new collection
@@ -1212,8 +1376,8 @@ func (m *Manager) CleanupExpiredPastes() {
 
 // ========== Chunked Upload Management ==========
 
-// ClientChunkSize is the size of chunks the client should send (2MB - fits well within I2P timeout)
-const ClientChunkSize = 2 * 1024 * 1024
+// ClientChunkSize is the size of chunks the client should send (256KB - matches storage ChunkSize)
+const ClientChunkSize = 256 * 1024
 
 // InitChunkedUpload creates a new chunked upload session
 func (m *Manager) InitChunkedUpload(id, filename, mimeType string, totalSize int64, totalChunks int, expiry, uploaderDest, passwordHash string, maxDownloads *int, keepMetadata bool) (*models.ChunkedUpload, error) {

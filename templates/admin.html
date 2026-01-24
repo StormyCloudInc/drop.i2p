@@ -107,7 +107,9 @@
                                     <td>{{.SizeFormatted}}</td>
                                     <td>{{.MimeType}}</td>
                                     <td>
-                                        {{if eq .EncryptionType "Hybrid PQ"}}
+                                        {{if eq .EncryptionType "E2EE"}}
+                                        <span class="tag tag-blue" title="Client-side encrypted - server cannot preview">E2EE</span>
+                                        {{else if eq .EncryptionType "Hybrid PQ"}}
                                         <span class="tag tag-green">Hybrid PQ</span>
                                         {{else}}
                                         <span class="tag tag-yellow">{{.EncryptionType}}</span>

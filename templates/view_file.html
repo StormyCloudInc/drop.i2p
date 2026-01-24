@@ -7,6 +7,7 @@
     <title>View File - I2P Secure Share</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <script src="/static/js/crypto-e2ee-v2.js"></script>
     <style>
         .file-icon {
             font-size: 4rem;
@@ -43,6 +44,67 @@
             max-width: 400px;
             margin: 1rem auto;
             text-align: left;
+        }
+
+        .e2e-decrypt-panel {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .e2e-decrypt-panel .file-icon {
+            font-size: 5rem;
+        }
+
+        .e2e-key-input {
+            max-width: 400px;
+            margin: 1.5rem auto;
+        }
+
+        .e2e-key-input input {
+            font-family: monospace;
+            letter-spacing: 1px;
+        }
+
+        .decrypt-progress {
+            max-width: 400px;
+            margin: 1.5rem auto;
+        }
+
+        .decrypt-progress .progress-bar {
+            height: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+
+        .decrypt-progress .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .decrypt-status {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .e2e-warning {
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            padding: 1rem;
+            border-radius: var(--radius-sm);
+            margin-top: 1.5rem;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .e2e-warning p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--warning);
         }
     </style>
 </head>
@@ -95,6 +157,61 @@
                             <button type="submit" class="btn btn-primary w-full">Unlock</button>
                         </form>
                     </div>
+                    {{else if .File.IsClientEncrypted}}
+                    <!-- E2EE Decryption UI -->
+                    <div class="e2e-decrypt-panel">
+                        <div class="file-icon">🔐</div>
+                        <h2 style="margin-bottom: 0.5rem;">End-to-End Encrypted File</h2>
+                        <p style="color: var(--text-muted); margin-bottom: 0.5rem;">{{.FileSizeFormatted}}</p>
+                        <p style="color: var(--text-muted);">Enter your decryption key to download this file.</p>
+
+                        <div class="e2e-key-input">
+                            <input type="text" id="decrypt-key" placeholder="Enter your 44-character decryption key" autocomplete="off">
+                        </div>
+
+                        <button id="decrypt-download-btn" class="btn btn-primary" style="min-width: 200px;" onclick="startDecryption()">
+                            Decrypt & Download
+                        </button>
+
+                        <div id="decrypt-progress" class="decrypt-progress hidden">
+                            <div class="progress-bar">
+                                <div id="progress-fill" class="progress-fill"></div>
+                            </div>
+                            <div id="decrypt-status" class="decrypt-status">Preparing...</div>
+                        </div>
+
+                        <div id="decrypt-error" class="alert alert-error hidden" style="max-width: 400px; margin: 1.5rem auto 0;"></div>
+
+                        <div class="e2e-warning">
+                            <p>This file was encrypted in the uploader's browser. The server cannot decrypt it or verify its contents.</p>
+                        </div>
+
+                        <div class="download-box" style="margin-top: 1.5rem; max-width: 400px; margin-left: auto; margin-right: auto;">
+                            <span style="color: var(--text-muted); font-size: 0.9rem; white-space: nowrap;">Share:</span>
+                            <input type="text" id="share-link" value="{{.Host}}/view/{{.File.ID}}" readonly onclick="this.select()">
+                            <button id="copy-share-button" class="btn" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(56, 189, 248, 0.2); color: var(--primary);">Copy</button>
+                        </div>
+                    </div>
+
+                    {{if .ShowDeleteButton}}
+                    <div style="margin-top: 2rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                        <div class="download-box" style="border-color: rgba(248, 113, 113, 0.3);">
+                            <span style="color: var(--error); font-size: 0.9rem; white-space: nowrap;">Delete Link:</span>
+                            <input type="text" id="delete-link" value="{{.Host}}/d/{{.File.ID}}/{{.DeleteToken}}" readonly
+                                onclick="this.select()" style="color: var(--error);">
+                            <button id="copy-delete-button" class="btn"
+                                style="padding: 0.4rem 0.8rem; font-size: 0.8rem; background: rgba(248, 113, 113, 0.1); color: var(--error);">Copy</button>
+                        </div>
+                        <p style="font-size: 0.8rem; color: var(--warning); text-align: center; margin-top: 0.5rem;">Save
+                            the delete link! It won't be shown again.</p>
+                        <div style="text-align: center; margin-top: 1rem;">
+                            <a href="/d/{{.File.ID}}/{{.DeleteToken}}" class="btn btn-danger"
+                                onclick="return confirm('Delete this file?');" style="text-decoration: none;">Delete File</a>
+                        </div>
+                    </div>
+                    {{end}}
+                    <!-- No Report Abuse button for E2EE files -->
+
                     {{else}}
 
                     <div style="text-align: center; margin-bottom: 2rem;">
@@ -194,6 +311,14 @@
     </div>
 
     <script>
+        // Clean up URL after showing flash message (remove query params and hash)
+        (function() {
+            if (window.location.search || window.location.hash) {
+                const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+                window.history.replaceState({}, document.title, cleanUrl);
+            }
+        })();
+
         // Copy functionality
         function setupCopy(btnId, inputId) {
             const btn = document.getElementById(btnId);
@@ -209,6 +334,7 @@
         }
         setupCopy('copy-button', 'download-link');
         setupCopy('copy-delete-button', 'delete-link');
+        setupCopy('copy-share-button', 'share-link');
 
         // Report form toggle
         const showReportBtn = document.getElementById('show-report-form');
@@ -249,6 +375,135 @@
                 } catch (err) {
                     status.textContent = 'Error submitting report.';
                     status.style.color = 'var(--error)';
+                }
+            });
+        }
+
+        // E2EE Decryption functionality
+        const fileId = '{{.File.ID}}';
+        let decrypting = false;
+
+        function showError(msg) {
+            const errorEl = document.getElementById('decrypt-error');
+            if (errorEl) {
+                errorEl.textContent = msg;
+                errorEl.classList.remove('hidden');
+            }
+        }
+
+        function hideError() {
+            const errorEl = document.getElementById('decrypt-error');
+            if (errorEl) {
+                errorEl.classList.add('hidden');
+            }
+        }
+
+        function updateProgress(percent, status) {
+            const progressEl = document.getElementById('decrypt-progress');
+            const fillEl = document.getElementById('progress-fill');
+            const statusEl = document.getElementById('decrypt-status');
+
+            if (progressEl) progressEl.classList.remove('hidden');
+            if (fillEl) fillEl.style.width = percent + '%';
+            if (statusEl) statusEl.textContent = status;
+        }
+
+        function hideProgress() {
+            const progressEl = document.getElementById('decrypt-progress');
+            if (progressEl) progressEl.classList.add('hidden');
+        }
+
+        async function startDecryption() {
+            if (decrypting) return;
+
+            const keyInput = document.getElementById('decrypt-key');
+            const btn = document.getElementById('decrypt-download-btn');
+
+            if (!keyInput || !keyInput.value.trim()) {
+                showError('Please enter your decryption key.');
+                return;
+            }
+
+            const keyStr = keyInput.value.trim();
+
+            // Validate key format (44 chars base64)
+            if (keyStr.length !== 44) {
+                showError('Invalid key length. Expected 44 characters.');
+                return;
+            }
+
+            // Convert key string to Uint8Array
+            let key;
+            try {
+                key = E2EE.stringToKey(keyStr);
+            } catch (e) {
+                showError('Invalid key format. Please check your key.');
+                return;
+            }
+
+            decrypting = true;
+            hideError();
+            btn.disabled = true;
+            btn.textContent = 'Decrypting...';
+            updateProgress(0, 'Fetching encrypted file...');
+
+            try {
+                // Fetch the encrypted file
+                const response = await fetch('/f/' + fileId);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch file: ' + response.status);
+                }
+
+                const encryptedData = new Uint8Array(await response.arrayBuffer());
+                updateProgress(20, 'Parsing encrypted data...');
+
+                // Decrypt the file (progress is 0-100)
+                const result = await E2EE.decryptFile(encryptedData, key, (progress) => {
+                    const percent = 20 + Math.floor(progress * 0.7);
+                    updateProgress(percent, 'Decrypting... ' + Math.floor(progress) + '%');
+                });
+
+                updateProgress(95, 'Preparing download...');
+
+                // Create blob and download
+                const blob = new Blob([result.data], { type: result.mimeType || 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = result.filename || 'decrypted-file';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+                updateProgress(100, 'Download complete!');
+
+                setTimeout(() => {
+                    hideProgress();
+                    btn.disabled = false;
+                    btn.textContent = 'Decrypt & Download';
+                    decrypting = false;
+                }, 2000);
+
+            } catch (e) {
+                console.error('Decryption error:', e);
+                hideProgress();
+                showError('Decryption failed: ' + (e.message || 'Invalid key or corrupted file'));
+                btn.disabled = false;
+                btn.textContent = 'Decrypt & Download';
+                decrypting = false;
+            }
+        }
+
+        // Allow Enter key to trigger decryption
+        const decryptKeyInput = document.getElementById('decrypt-key');
+        if (decryptKeyInput) {
+            decryptKeyInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    startDecryption();
                 }
             });
         }
