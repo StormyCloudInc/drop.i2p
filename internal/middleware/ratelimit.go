@@ -178,10 +178,22 @@ func (rl *RateLimiter) AllowBytes(destB32 string, bytes int64) bool {
 	return true
 }
 
-// RateLimitMiddleware creates HTTP middleware for rate limiting
-func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
+// RateLimitMiddleware creates HTTP middleware for rate limiting.
+// adminPrefix is exempted entirely: admin routes sit behind adminAuth and their
+// POSTs are moderation actions, not uploads, so they must not spend the upload budget.
+func RateLimitMiddleware(limiter *RateLimiter, adminPrefix string) func(http.Handler) http.Handler {
+	adminPrefix = strings.TrimSuffix(adminPrefix, "/")
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Never rate limit the admin dashboard.
+			if adminPrefix != "" {
+				if p := r.URL.Path; p == adminPrefix || strings.HasPrefix(p, adminPrefix+"/") {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
 			destB32 := i2p.GetDestinationFromRequest(r)
 
 			// Apply rate limiting based on request type

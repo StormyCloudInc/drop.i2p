@@ -169,7 +169,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(i2p.I2PMiddleware)
 
 	// Rate limiting middleware (per I2P destination)
-	r.Use(mw.RateLimitMiddleware(s.rateLimiter))
+	r.Use(mw.RateLimitMiddleware(s.rateLimiter, s.cfg.AdminURL))
 
 	// Static Files
 	// Static Files
