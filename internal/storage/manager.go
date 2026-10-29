@@ -19,6 +19,7 @@ import (
 	"drop-i2p/internal/crypto"
 	"drop-i2p/internal/db"
 	"drop-i2p/internal/models"
+	"drop-i2p/internal/phash"
 
 	"github.com/google/uuid"
 )
@@ -37,7 +38,8 @@ type UploadOptions struct {
 	PasswordHash      string
 	MaxDownloads      *int
 	MetadataStripped  bool
-	IsClientEncrypted bool // True if file was encrypted client-side (E2EE)
+	IsClientEncrypted bool   // True if file was encrypted client-side (E2EE)
+	PerceptualHash    string // dHash of the image, computed by the caller before storage
 }
 
 // ClamAVChecker interface for virus/malware scanning
@@ -175,9 +177,9 @@ func (m *Manager) SaveFile(fileID string, reader io.Reader, filename, mimeType s
 
 	// Insert File Record with extended fields including hybrid encryption fields
 	_, err = tx.Exec(`
-		INSERT INTO files (id, filename, original_filename, size, mime_type, content_hash, expiry_time, delete_token, is_encrypted, uploader_dest, password_hash, max_downloads, metadata_stripped, kem_ciphertext, key_version, encryption_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, fileID, filename, filename, totalSize, mimeType, contentHash, expiryTime, deleteToken, true, uploaderDest, opts.PasswordHash, opts.MaxDownloads, opts.MetadataStripped, kemCiphertext, keyVersion, encryptionVersion)
+		INSERT INTO files (id, filename, original_filename, size, mime_type, content_hash, expiry_time, delete_token, is_encrypted, uploader_dest, password_hash, max_downloads, metadata_stripped, kem_ciphertext, key_version, encryption_version, perceptual_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, fileID, filename, filename, totalSize, mimeType, contentHash, expiryTime, deleteToken, true, uploaderDest, opts.PasswordHash, opts.MaxDownloads, opts.MetadataStripped, kemCiphertext, keyVersion, encryptionVersion, nullIfEmpty(opts.PerceptualHash))
 
 	if err != nil {
 		return nil, err
@@ -584,7 +586,7 @@ func (m *Manager) GetFileMetadata(id string) (*models.File, error) {
 		       is_encrypted, COALESCE(is_blocked, 0), COALESCE(uploader_dest, ''), download_count,
 		       COALESCE(password_hash, ''), max_downloads, COALESCE(metadata_stripped, 1),
 		       kem_ciphertext, COALESCE(key_version, 0), COALESCE(encryption_version, 1),
-		       COALESCE(is_client_encrypted, 0)
+		       COALESCE(is_client_encrypted, 0), COALESCE(NULLIF(perceptual_hash, '-'), '')
 		FROM files WHERE id = ?`, id)
 
 	var f models.File
@@ -593,7 +595,7 @@ func (m *Manager) GetFileMetadata(id string) (*models.File, error) {
 		&f.IsEncrypted, &f.IsBlocked, &f.UploaderDest, &f.DownloadCount,
 		&f.PasswordHash, &f.MaxDownloads, &f.MetadataStripped,
 		&f.KEMCiphertext, &f.KeyVersion, &f.EncryptionVersion,
-		&f.IsClientEncrypted); err != nil {
+		&f.IsClientEncrypted, &f.PerceptualHash); err != nil {
 		return nil, err
 	}
 	return &f, nil
@@ -1611,6 +1613,30 @@ func (m *Manager) CompleteChunkedUpload(uploadID string) (*models.File, string, 
 		}
 	}
 
+	// Refuse banned content before anything is stored. Hash the assembled
+	// plaintext exactly as content_hash is computed below, and compute a
+	// perceptual hash if the bytes decode as an image (whatever the MIME claims).
+	var assembledSize int
+	preHasher := sha256.New()
+	for _, p := range decryptedChunks {
+		preHasher.Write(p)
+		assembledSize += len(p)
+	}
+	preHash := hex.EncodeToString(preHasher.Sum(nil))
+	var perceptualHash string
+	if len(decryptedChunks) > 0 && assembledSize <= phash.MaxDecodeBytes && looksLikeImage(decryptedChunks[0]) {
+		perceptualHash = PerceptualHashOf(bytes.Join(decryptedChunks, nil))
+	}
+	if match, err := m.CheckContentBan(preHash, perceptualHash); err == nil && match != nil {
+		for _, uc := range chunks {
+			os.Remove(filepath.Join(m.cfg.UploadFolder, uc.ChunkPath))
+		}
+		db.DB.Exec("DELETE FROM upload_chunks WHERE upload_id = ?", uploadID)
+		db.DB.Exec("DELETE FROM chunked_uploads WHERE id = ?", uploadID)
+		m.RecordBannedUpload(upload.UploaderDest, match)
+		return nil, "", &ContentBannedError{Match: match}
+	}
+
 	// ClamAV virus scan (before re-encryption/storage)
 	if needsClamAV {
 		infected, threat, err := m.clamAV.CheckFile(context.Background(), fileBuffer.Bytes())
@@ -1710,9 +1736,9 @@ func (m *Manager) CompleteChunkedUpload(uploadID string) (*models.File, string, 
 
 	// Insert file record with hybrid encryption fields
 	_, err = tx.Exec(`
-		INSERT INTO files (id, filename, original_filename, size, mime_type, content_hash, expiry_time, delete_token, is_encrypted, uploader_dest, password_hash, max_downloads, metadata_stripped, kem_ciphertext, key_version, encryption_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, fileID, upload.Filename, upload.Filename, totalSize, upload.MimeType, contentHash, expiryTime, deleteToken, true, upload.UploaderDest, upload.PasswordHash, upload.MaxDownloads, metadataStripped, kemCiphertext, keyVersion, encryptionVersion)
+		INSERT INTO files (id, filename, original_filename, size, mime_type, content_hash, expiry_time, delete_token, is_encrypted, uploader_dest, password_hash, max_downloads, metadata_stripped, kem_ciphertext, key_version, encryption_version, perceptual_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, fileID, upload.Filename, upload.Filename, totalSize, upload.MimeType, contentHash, expiryTime, deleteToken, true, upload.UploaderDest, upload.PasswordHash, upload.MaxDownloads, metadataStripped, kemCiphertext, keyVersion, encryptionVersion, nullIfEmpty(perceptualHash))
 	if err != nil {
 		return nil, "", err
 	}

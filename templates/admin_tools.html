@@ -58,6 +58,19 @@
                         </form>
                     </div>
 
+                    <!-- Perceptual Hash Backfill -->
+                    <div class="glass-panel" style="padding: 2rem;">
+                        <h2 class="mb-2">Perceptual Hash Backfill</h2>
+                        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                            Compute perceptual hashes for files uploaded before hash matching existed,
+                            so they can be banned by similarity. Any file that matches an existing ban
+                            is blocked. New uploads are hashed automatically. Safe to run repeatedly.
+                        </p>
+                        <form action="{{.AdminURL}}/tools/backfill-phash" method="POST">
+                            <button type="submit" class="btn btn-primary">Run Backfill</button>
+                        </form>
+                    </div>
+
                     <!-- Encryption Status -->
                     <div class="glass-panel" style="padding: 2rem;">
                         <h2 class="mb-4">Encryption Status</h2>

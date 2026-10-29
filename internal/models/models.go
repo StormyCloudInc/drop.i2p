@@ -6,19 +6,19 @@ import (
 
 // File represents a file uploaded to the service
 type File struct {
-	ID               string     `db:"id" json:"id"`
-	Filename         string     `db:"filename" json:"filename"`
-	OriginalFilename string     `db:"original_filename" json:"original_filename"`
-	Size             int64      `db:"size" json:"size"`
-	MimeType         string     `db:"mime_type" json:"mime_type"`
-	ContentHash      string     `db:"content_hash" json:"content_hash"`
-	UploadTime       time.Time  `db:"upload_time" json:"upload_time"`
-	ExpiryTime       *time.Time `db:"expiry_time" json:"expiry_time"`
-	DeleteToken      string     `db:"delete_token" json:"-"`
-	IsEncrypted      bool       `db:"is_encrypted" json:"is_encrypted"`
-	IsBlocked        bool       `db:"is_blocked" json:"is_blocked"`
-	UploaderDest     string     `db:"uploader_dest" json:"-"`
-	DownloadCount    int        `db:"download_count" json:"download_count"`
+	ID                string     `db:"id" json:"id"`
+	Filename          string     `db:"filename" json:"filename"`
+	OriginalFilename  string     `db:"original_filename" json:"original_filename"`
+	Size              int64      `db:"size" json:"size"`
+	MimeType          string     `db:"mime_type" json:"mime_type"`
+	ContentHash       string     `db:"content_hash" json:"content_hash"`
+	UploadTime        time.Time  `db:"upload_time" json:"upload_time"`
+	ExpiryTime        *time.Time `db:"expiry_time" json:"expiry_time"`
+	DeleteToken       string     `db:"delete_token" json:"-"`
+	IsEncrypted       bool       `db:"is_encrypted" json:"is_encrypted"`
+	IsBlocked         bool       `db:"is_blocked" json:"is_blocked"`
+	UploaderDest      string     `db:"uploader_dest" json:"-"`
+	DownloadCount     int        `db:"download_count" json:"download_count"`
 	PasswordHash      string     `db:"password_hash" json:"-"`
 	MaxDownloads      *int       `db:"max_downloads" json:"max_downloads"`
 	MetadataStripped  bool       `db:"metadata_stripped" json:"metadata_stripped"`
@@ -26,6 +26,7 @@ type File struct {
 	KeyVersion        int        `db:"key_version" json:"-"`
 	EncryptionVersion int        `db:"encryption_version" json:"-"` // 1=legacy AES-GCM, 2=hybrid PQ, 3=client-side E2EE
 	IsClientEncrypted bool       `db:"is_client_encrypted" json:"is_client_encrypted"`
+	PerceptualHash    string     `db:"perceptual_hash" json:"-"` // dHash hex; empty if not an image or too flat
 }
 
 // Chunk represents a part of a larger file
@@ -39,16 +40,16 @@ type Chunk struct {
 
 // Report represents a content report for moderation
 type Report struct {
-	ID          string     `db:"id" json:"id"`
-	FileID      string     `db:"file_id" json:"file_id"`
-	ReporterDest string    `db:"reporter_dest" json:"-"`
-	Reason      string     `db:"reason" json:"reason"`
-	Details     string     `db:"details" json:"details"`
-	Status      string     `db:"status" json:"status"`
-	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
-	ReviewedAt  *time.Time `db:"reviewed_at" json:"reviewed_at"`
-	ReviewedBy  string     `db:"reviewed_by" json:"reviewed_by"`
-	ActionTaken string     `db:"action_taken" json:"action_taken"`
+	ID           string     `db:"id" json:"id"`
+	FileID       string     `db:"file_id" json:"file_id"`
+	ReporterDest string     `db:"reporter_dest" json:"-"`
+	Reason       string     `db:"reason" json:"reason"`
+	Details      string     `db:"details" json:"details"`
+	Status       string     `db:"status" json:"status"`
+	CreatedAt    time.Time  `db:"created_at" json:"created_at"`
+	ReviewedAt   *time.Time `db:"reviewed_at" json:"reviewed_at"`
+	ReviewedBy   string     `db:"reviewed_by" json:"reviewed_by"`
+	ActionTaken  string     `db:"action_taken" json:"action_taken"`
 }
 
 // Ban represents a ban on a destination or content hash
@@ -137,6 +138,8 @@ const (
 const (
 	BanTypeDestination = "destination"
 	BanTypeFileHash    = "file_hash"
+	// BanTypePerceptualHash matches visually similar images (dHash within threshold)
+	BanTypePerceptualHash = "perceptual_hash"
 )
 
 // StatsSnapshot represents a point-in-time snapshot of stats for analytics

@@ -2,10 +2,12 @@ package server
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 
 	"drop-i2p/internal/i2p"
 	"drop-i2p/internal/models"
+	"drop-i2p/internal/phash"
 	"drop-i2p/internal/storage"
 	"drop-i2p/internal/validator"
 
@@ -305,6 +308,17 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			filename = newFilename
 			mimeType = newMimeType
 		}
+	}
+
+	// Refuse content matching a hash ban (exact or perceptual). Skipped for
+	// E2EE uploads: the server only sees ciphertext.
+	if !isClientEncrypted {
+		perceptual, refused := s.checkBannedContent(fileData, uploaderDest)
+		if refused {
+			renderMessage(w, http.StatusForbidden, "error", "Upload Blocked", "This file is not allowed on this service.")
+			return
+		}
+		opts.PerceptualHash = perceptual
 	}
 
 	var fileReader io.Reader = bytes.NewReader(fileData)
@@ -911,9 +925,18 @@ func (s *Server) handleAdminReportAction(w http.ResponseWriter, r *http.Request)
 		if err == nil && report != nil {
 			file, _ := s.store.GetFileMetadata(report.FileID)
 			if file != nil && file.ContentHash != "" {
-				s.store.CreateBan(uuid.New().String(), "file_hash", file.ContentHash, "Banned via report", nil)
+				n, err := s.store.BanFileContent(file, "Banned via report "+reportID)
+				if err != nil {
+					log.Printf("ban_hash: failed to ban content for report %s: %v", reportID, err)
+					http.Redirect(w, r, s.cfg.AdminURL+"/reports?flash=Failed+to+create+ban&flash_type=error", http.StatusSeeOther)
+					return
+				}
 				s.store.DeleteFile(report.FileID)
-				s.store.UpdateReportStatus(reportID, "actioned", "Content hash banned and file deleted")
+				note := "Content hash banned and file deleted"
+				if file.PerceptualHash != "" {
+					note = "Content hash and perceptual hash banned, file deleted"
+				}
+				s.store.UpdateReportStatus(reportID, "actioned", fmt.Sprintf("%s (%d bans)", note, n))
 			}
 		}
 	case "ban_uploader":
@@ -955,6 +978,34 @@ func (s *Server) handleAdminCreateBan(w http.ResponseWriter, r *http.Request) {
 
 	if banType == "" || value == "" {
 		http.Error(w, "ban_type and value are required", http.StatusBadRequest)
+		return
+	}
+	value = strings.TrimSpace(value)
+	switch banType {
+	case models.BanTypeDestination:
+	case models.BanTypeFileHash:
+		value = strings.ToLower(value)
+		if len(value) != 64 {
+			http.Error(w, "file_hash must be a 64-character SHA-256 hex string", http.StatusBadRequest)
+			return
+		}
+		if _, err := hex.DecodeString(value); err != nil {
+			http.Error(w, "file_hash must be hex", http.StatusBadRequest)
+			return
+		}
+	case models.BanTypePerceptualHash:
+		h, err := phash.Parse(value)
+		if err != nil {
+			http.Error(w, "perceptual_hash must be a 16-character hex dHash", http.StatusBadRequest)
+			return
+		}
+		if !phash.Reliable(h) {
+			http.Error(w, "perceptual_hash has too little detail and would match unrelated images", http.StatusBadRequest)
+			return
+		}
+		value = h.String()
+	default:
+		http.Error(w, "unknown ban_type", http.StatusBadRequest)
 		return
 	}
 
@@ -1013,6 +1064,39 @@ func (s *Server) handleAdminCleanup(w http.ResponseWriter, r *http.Request) {
 		s.store.CleanupExpiredChunkedUploads()
 	}()
 	http.Redirect(w, r, s.cfg.AdminURL+"?flash=Cleanup+started&flash_type=success", http.StatusSeeOther)
+}
+
+// handleAdminBackfillPHash computes perceptual hashes for existing files and
+// blocks any that match an existing ban.
+func (s *Server) handleAdminBackfillPHash(w http.ResponseWriter, r *http.Request) {
+	res, err := s.store.BackfillPerceptualHashes()
+	if err != nil {
+		log.Printf("phash backfill failed: %v", err)
+		http.Redirect(w, r, s.cfg.AdminURL+"/tools?flash=Backfill+failed&flash_type=error", http.StatusSeeOther)
+		return
+	}
+	log.Printf("phash backfill: %+v", *res)
+	msg := fmt.Sprintf("Backfill: %d scanned, %d hashed, %d not images, %d errors, %d blocked by existing bans",
+		res.Scanned, res.Hashed, res.NotImage, res.Errors, res.MatchedBans)
+	http.Redirect(w, r, s.cfg.AdminURL+"/tools?flash="+url.QueryEscape(msg)+"&flash_type=success", http.StatusSeeOther)
+}
+
+// checkBannedContent checks plaintext upload bytes against hash bans. It
+// returns the perceptual hash to store with the file, and whether the upload
+// must be refused. A database error fails open (the upload proceeds) so a
+// transient DB issue cannot take uploads down; it is logged.
+func (s *Server) checkBannedContent(data []byte, uploaderDest string) (perceptual string, refused bool) {
+	perceptual = storage.PerceptualHashOf(data)
+	match, err := s.store.CheckContentBan(storage.SHA256Hex(data), perceptual)
+	if err != nil {
+		log.Printf("content-ban: check failed, allowing upload: %v", err)
+		return perceptual, false
+	}
+	if match == nil {
+		return perceptual, false
+	}
+	s.store.RecordBannedUpload(uploaderDest, match)
+	return perceptual, true
 }
 
 // ========== Paste Handlers ==========
@@ -1352,6 +1436,18 @@ func (s *Server) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Malware detected: %s", threat)})
 			return
 		}
+	}
+
+	// Refuse content matching a hash ban (skipped for E2EE ciphertext)
+	if !isClientEncrypted {
+		perceptual, refused := s.checkBannedContent(fileData, uploaderDest)
+		if refused {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{"error": "This file is not allowed on this service."})
+			return
+		}
+		opts.PerceptualHash = perceptual
 	}
 
 	var fileReader io.Reader = bytes.NewReader(fileData)
@@ -1741,6 +1837,12 @@ func (s *Server) handleChunkedComplete(w http.ResponseWriter, r *http.Request) {
 	uploadID := chi.URLParam(r, "uploadID")
 
 	file, deleteToken, err := s.store.CompleteChunkedUpload(uploadID)
+	if _, banned := storage.AsContentBanned(err); banned {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "This file is not allowed on this service."})
+		return
+	}
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

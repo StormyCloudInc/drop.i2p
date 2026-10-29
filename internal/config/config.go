@@ -35,6 +35,10 @@ type Config struct {
 
 	// Announcement banner
 	AnnouncementFile string // SSP_ANNOUNCEMENT_FILE - path to announcement.txt file
+
+	// Banned-content matching
+	PHashThreshold     int  // SSP_PHASH_THRESHOLD - max dHash Hamming distance treated as a match (default 10, 0 disables perceptual matching)
+	AutoBanOnHashMatch bool // SSP_AUTOBAN_ON_HASH_MATCH - ban the uploader's destination when they upload an exact banned file (default true)
 }
 
 func Load() *Config {
@@ -55,27 +59,29 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:              getEnv("SSP_PORT", "8080"),
-		UploadFolder:      getEnv("SSP_UPLOAD_FOLDER", "uploads"),
-		DatabasePath:      getEnv("SSP_DATABASE_PATH", "database.db"),
-		EncryptionKey:     getEnv("SSP_ENCRYPTION_KEY", ""),
-		AdminPasswordHash: getEnv("SSP_ADMIN_PASSWORD_HASH", ""),
-		AdminURL:          getEnv("SSP_ADMIN_URL", "/admin"),
-		FlaskDebug:        getEnv("SSP_FLASK_DEBUG", "false") == "true",
-		X25519Seed:        getEnv("SSP_X25519_SEED", ""),
-		MLKEMSeed:         getEnv("SSP_MLKEM_SEED", ""),
-		KeyVersion:    keyVersion,
-		ClamAVEnabled: clamAVEnabled,
-		ClamAVSocket:      getEnv("SSP_CLAMAV_SOCKET", "/var/run/clamav/clamd.sock"),
-		ClamAVHost:        getEnv("SSP_CLAMAV_HOST", "localhost:3310"),
-		ClamAVTimeout:     clamAVTimeout,
-		ClamAVFailOpen:    getEnv("SSP_CLAMAV_FAIL_OPEN", "true") == "true",
-		WebhookURL:        getEnv("SSP_WEBHOOK_URL", ""),
-		WebhookSecret:     getEnv("SSP_WEBHOOK_SECRET", ""),
-		WebhookEvents:     getEnv("SSP_WEBHOOK_EVENTS", "report,storage"),
-		WebhookTimeout:    parseIntEnv("SSP_WEBHOOK_TIMEOUT", 10),
-		StorageAlertGB:    parseIntEnv("SSP_STORAGE_ALERT_GB", 0),
-		AnnouncementFile:  getEnv("SSP_ANNOUNCEMENT_FILE", "announcement.txt"),
+		Port:               getEnv("SSP_PORT", "8080"),
+		UploadFolder:       getEnv("SSP_UPLOAD_FOLDER", "uploads"),
+		DatabasePath:       getEnv("SSP_DATABASE_PATH", "database.db"),
+		EncryptionKey:      getEnv("SSP_ENCRYPTION_KEY", ""),
+		AdminPasswordHash:  getEnv("SSP_ADMIN_PASSWORD_HASH", ""),
+		AdminURL:           getEnv("SSP_ADMIN_URL", "/admin"),
+		FlaskDebug:         getEnv("SSP_FLASK_DEBUG", "false") == "true",
+		X25519Seed:         getEnv("SSP_X25519_SEED", ""),
+		MLKEMSeed:          getEnv("SSP_MLKEM_SEED", ""),
+		KeyVersion:         keyVersion,
+		ClamAVEnabled:      clamAVEnabled,
+		ClamAVSocket:       getEnv("SSP_CLAMAV_SOCKET", "/var/run/clamav/clamd.sock"),
+		ClamAVHost:         getEnv("SSP_CLAMAV_HOST", "localhost:3310"),
+		ClamAVTimeout:      clamAVTimeout,
+		ClamAVFailOpen:     getEnv("SSP_CLAMAV_FAIL_OPEN", "true") == "true",
+		WebhookURL:         getEnv("SSP_WEBHOOK_URL", ""),
+		WebhookSecret:      getEnv("SSP_WEBHOOK_SECRET", ""),
+		WebhookEvents:      getEnv("SSP_WEBHOOK_EVENTS", "report,storage"),
+		WebhookTimeout:     parseIntEnv("SSP_WEBHOOK_TIMEOUT", 10),
+		StorageAlertGB:     parseIntEnv("SSP_STORAGE_ALERT_GB", 0),
+		AnnouncementFile:   getEnv("SSP_ANNOUNCEMENT_FILE", "announcement.txt"),
+		PHashThreshold:     parseIntEnv("SSP_PHASH_THRESHOLD", 10),
+		AutoBanOnHashMatch: getEnv("SSP_AUTOBAN_ON_HASH_MATCH", "true") == "true",
 	}
 }
 

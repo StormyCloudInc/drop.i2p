@@ -245,6 +245,7 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/bans/{banID}", s.handleAdminDeleteBan)
 		r.Get("/tools", s.handleAdminTools)
 		r.Post("/tools/cleanup", s.handleAdminCleanup)
+		r.Post("/tools/backfill-phash", s.handleAdminBackfillPHash)
 		r.Get("/analytics", s.handleAdminAnalytics)
 	})
 

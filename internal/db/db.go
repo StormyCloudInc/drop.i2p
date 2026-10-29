@@ -45,7 +45,37 @@ func runMigrations() error {
 			// Only log unexpected errors, duplicate column is expected
 		}
 	}
+
+	// Perceptual image hash (dHash, 16 hex chars) for near-duplicate ban matching
+	if err := addColumnIfMissing("files", "perceptual_hash", "TEXT"); err != nil {
+		return err
+	}
 	return nil
+}
+
+// addColumnIfMissing adds a column only when PRAGMA table_info shows it absent,
+// so migrations are idempotent without string-matching driver error messages.
+func addColumnIfMissing(table, column, decl string) error {
+	rows, err := DB.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	_, err = DB.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
+	return err
 }
 
 func createTables() error {
@@ -71,7 +101,8 @@ func createTables() error {
 		kem_ciphertext BLOB,
 		key_version INTEGER DEFAULT 0,
 		encryption_version INTEGER DEFAULT 2,
-		is_client_encrypted BOOLEAN DEFAULT 0
+		is_client_encrypted BOOLEAN DEFAULT 0,
+		perceptual_hash TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_expiry ON files(expiry_time);
 	CREATE INDEX IF NOT EXISTS idx_token ON files(delete_token);
