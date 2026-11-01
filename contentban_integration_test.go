@@ -31,6 +31,7 @@ import (
 	"drop-i2p/internal/storage"
 
 	"github.com/disintegration/imaging"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func testPattern(seed int) *image.NRGBA {
@@ -77,6 +78,8 @@ type harness struct {
 	t     *testing.T
 	h     http.Handler
 	store *storage.Manager
+	srv   *server.Server
+	cfg   *config.Config
 }
 
 func newHarness(t *testing.T) *harness {
@@ -89,6 +92,8 @@ func newHarness(t *testing.T) *harness {
 	cfg.AdminURL = "/admdash"
 	cfg.PHashThreshold = 10
 	cfg.AutoBanOnHashMatch = true
+	adminHash, _ := bcrypt.GenerateFromPassword([]byte("test-admin-pw"), bcrypt.MinCost)
+	cfg.AdminPasswordHash = string(adminHash)
 
 	if err := db.Init(cfg.DatabasePath); err != nil {
 		t.Fatal(err)
@@ -101,7 +106,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	store := storage.NewManagerWithKeys(cfg, km)
-	return &harness{t: t, h: server.New(cfg, store).Router(), store: store}
+	srv := server.New(cfg, store)
+	return &harness{t: t, h: srv.Router(), store: store, srv: srv, cfg: cfg}
 }
 
 // apiUpload posts a file to /api/upload and returns the status and file ID.

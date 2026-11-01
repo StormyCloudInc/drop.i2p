@@ -39,6 +39,16 @@ type Config struct {
 	// Banned-content matching
 	PHashThreshold     int  // SSP_PHASH_THRESHOLD - max dHash Hamming distance treated as a match (default 10, 0 disables perceptual matching)
 	AutoBanOnHashMatch bool // SSP_AUTOBAN_ON_HASH_MATCH - ban the uploader's destination when they upload an exact banned file (default true)
+
+	// Evidence retention and NCMEC CyberTipline reporting
+	EvidenceHoldDays   int    // SSP_EVIDENCE_HOLD_DAYS - days a taken-down file is preserved before purge (default 365, per 18 U.S.C. 2258A(h))
+	PublicURL          string // SSP_PUBLIC_URL - public base URL used in reports (default http://drop.i2p)
+	NCMECEnv           string // SSP_NCMEC_ENV - "production" or "test" (default test). Real files are only ever sent in production.
+	NCMECUsername      string // SSP_NCMEC_USERNAME
+	NCMECPassword      string // SSP_NCMEC_PASSWORD
+	NCMECReporterEmail string // SSP_NCMEC_REPORTER_EMAIL - required to file reports
+	NCMECReporterFirst string // SSP_NCMEC_REPORTER_FIRST_NAME
+	NCMECReporterLast  string // SSP_NCMEC_REPORTER_LAST_NAME
 }
 
 func Load() *Config {
@@ -82,6 +92,14 @@ func Load() *Config {
 		AnnouncementFile:   getEnv("SSP_ANNOUNCEMENT_FILE", "announcement.txt"),
 		PHashThreshold:     parseIntEnv("SSP_PHASH_THRESHOLD", 10),
 		AutoBanOnHashMatch: getEnv("SSP_AUTOBAN_ON_HASH_MATCH", "true") == "true",
+		EvidenceHoldDays:   parseIntEnv("SSP_EVIDENCE_HOLD_DAYS", 365),
+		PublicURL:          getEnv("SSP_PUBLIC_URL", "http://drop.i2p"),
+		NCMECEnv:           getEnv("SSP_NCMEC_ENV", "test"),
+		NCMECUsername:      getEnv("SSP_NCMEC_USERNAME", ""),
+		NCMECPassword:      getEnv("SSP_NCMEC_PASSWORD", ""),
+		NCMECReporterEmail: getEnv("SSP_NCMEC_REPORTER_EMAIL", ""),
+		NCMECReporterFirst: getEnv("SSP_NCMEC_REPORTER_FIRST_NAME", ""),
+		NCMECReporterLast:  getEnv("SSP_NCMEC_REPORTER_LAST_NAME", ""),
 	}
 }
 

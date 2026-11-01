@@ -533,8 +533,13 @@ func (m *Manager) getGCM() (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-// DeleteFile removes a file and its chunks
+// DeleteFile removes a file and its chunks. It refuses files under an
+// evidence hold, whichever path calls it: expiry cleanup, the uploader's
+// delete link, max-download limits, or an admin action.
 func (m *Manager) DeleteFile(fileID string) error {
+	if m.IsPreserved(fileID) {
+		return ErrPreserved
+	}
 	// Get chunks to delete from disk
 	rows, err := db.DB.Query("SELECT chunk_path FROM chunks WHERE file_id = ?", fileID)
 	if err != nil {

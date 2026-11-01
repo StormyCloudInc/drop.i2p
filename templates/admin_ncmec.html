@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - NCMEC - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container" style="max-width: 1400px;">
+
+            <header class="header-section">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="text-align: left;">
+                        <a href="/" style="display: inline-block; margin-bottom: 0.5rem;">
+                            <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 40px;">
+                        </a>
+                        <h1>Admin Dashboard</h1>
+                    </div>
+                    <div>
+                        <a href="/" class="btn">Back to Home</a>
+                    </div>
+                </div>
+            </header>
+
+            <main>
+                {{if .Flash}}
+                <div class="alert alert-{{.FlashType}}">
+                    {{.Flash}}
+                </div>
+                {{end}}
+
+                <div class="admin-nav">
+                    <a href="{{.AdminURL}}">Files</a>
+                    <a href="{{.AdminURL}}/reports">Reports</a>
+                    <a href="{{.AdminURL}}/ncmec" class="active">NCMEC</a>
+                    <a href="{{.AdminURL}}/bans">Bans</a>
+                    <a href="{{.AdminURL}}/tools">Tools</a>
+                    <a href="{{.AdminURL}}/analytics">Analytics</a>
+                </div>
+
+                <div class="glass-panel" style="padding: 1rem 1.5rem; margin-bottom: 1.5rem;">
+                    Reporting mode:
+                    {{if eq .Mode "production"}}<span class="tag tag-green">PRODUCTION</span> Reports are filed with NCMEC.
+                    {{else if eq .Mode "test"}}<span class="tag tag-yellow">TEST</span> Takedowns work. Real files are never sent to NCMEC's test environment, so reports wait as "not sent" until production is configured.
+                    {{else}}<span class="tag tag-red">NOT CONFIGURED</span> Takedowns work. Reports wait as "not sent" until credentials are set.{{end}}
+                </div>
+
+                <div class="glass-panel" style="padding: 1.5rem;">
+                    <h2 class="mb-2">Taken-down files</h2>
+                    <p class="text-muted" style="margin-bottom: 1rem;">
+                        Blocked from public access and preserved encrypted until the hold date. They are purged
+                        automatically after that. Use "Take down" on the Files or Reports page to add one.
+                    </p>
+                    {{if .Items}}
+                    <div style="overflow-x: auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>File</th>
+                                    <th>Uploader</th>
+                                    <th>Taken down</th>
+                                    <th>Held until</th>
+                                    <th>NCMEC</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Items}}
+                                <tr>
+                                    <td>
+                                        <code title="{{.FileID}}">{{truncate .FileID 8}}</code>
+                                        <div class="text-muted" style="font-size: 0.75rem;">{{.MimeType}} &middot; {{formatBytes .Size}}{{if .IsClientEncrypted}} &middot; E2EE{{end}}</div>
+                                    </td>
+                                    <td><span class="text-truncate" title="{{.UploaderDest}}">{{if .UploaderDest}}{{truncate .UploaderDest 16}}{{else}}unknown{{end}}</span></td>
+                                    <td>{{if .TakedownAt}}{{.TakedownAt.Format "Jan 02 15:04"}}{{end}}</td>
+                                    <td>{{if .PreservedUntil}}{{.PreservedUntil.Format "Jan 02 2006"}}{{end}}</td>
+                                    <td>
+                                        {{if eq .Status "reported"}}<span class="tag tag-green">Reported</span>
+                                        <div style="font-size: 0.8rem;">CyberTip <strong>{{.ReportID}}</strong></div>
+                                        {{else if eq .Status "pending"}}<span class="tag tag-blue">Queued</span>
+                                        {{else if eq .Status "sending"}}<span class="tag tag-blue">Sending&hellip;</span>
+                                        {{else if eq .Status "failed"}}<span class="tag tag-red">Failed</span>
+                                        {{else if eq .Status "not_sent"}}<span class="tag tag-yellow">Not sent</span>
+                                        {{else if eq .Status "not_sendable"}}<span class="tag tag-yellow">Manual report needed</span>
+                                        {{else}}<span class="tag tag-yellow">Not reported</span>{{end}}
+                                        {{if .Error}}<div class="text-muted" style="font-size: 0.75rem; max-width: 28rem;">{{.Error}}</div>{{end}}
+                                    </td>
+                                    <td>
+                                        {{if and (ne .Status "reported") (ne .Status "sending") (ne .Status "pending")}}
+                                        <form action="{{$.AdminURL}}/ncmec/send/{{.FileID}}" method="POST" class="action-form"
+                                            onsubmit="return confirm('Send this report to NCMEC?');">
+                                            <button class="tag tag-blue">{{if or (eq .Status "failed") (eq .Status "not_sent")}}Retry{{else}}Report{{end}}</button>
+                                        </form>
+                                        {{end}}
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+                    {{else}}
+                    <div style="padding: 2rem; text-align: center;" class="text-muted">Nothing has been taken down yet.</div>
+                    {{end}}
+                </div>
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>

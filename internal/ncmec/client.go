@@ -28,6 +28,8 @@ type Client struct {
 	Username string
 	Password string
 	HTTP     *http.Client
+
+	production bool // fixed at construction; BaseURL may be overridden in tests
 }
 
 // NewClient returns a client for the given environment ("test" or "production").
@@ -39,15 +41,16 @@ func NewClient(env, username, password string) *Client {
 		base = ProductionBaseURL
 	}
 	return &Client{
-		BaseURL:  base,
-		Username: username,
-		Password: password,
-		HTTP:     &http.Client{Timeout: 5 * time.Minute},
+		production: env == "production",
+		BaseURL:    base,
+		Username:   username,
+		Password:   password,
+		HTTP:       &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
 // IsProduction reports whether the client targets the production API.
-func (c *Client) IsProduction() bool { return c.BaseURL == ProductionBaseURL }
+func (c *Client) IsProduction() bool { return c.production }
 
 // APIError is a non-zero responseCode or an HTTP failure from NCMEC.
 type APIError struct {

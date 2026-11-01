@@ -70,6 +70,7 @@
                     <a href="{{.AdminURL}}" class="active">Files</a>
                     <a href="{{.AdminURL}}/reports">Reports {{if .Reports}}<span class="tag tag-yellow"
                             style="margin-left:5px;">{{len .Reports}}</span>{{end}}</a>
+                    <a href="{{.AdminURL}}/ncmec">NCMEC</a>
                     <a href="{{.AdminURL}}/bans">Bans</a>
                     <a href="{{.AdminURL}}/tools">Tools</a>
                     <a href="{{.AdminURL}}/analytics">Analytics</a>
@@ -132,6 +133,7 @@
                                         {{end}}
                                     </td>
                                     <td>
+                                        <a href="{{$.AdminURL}}/ncmec/takedown/{{.ID}}" class="action-btn" style="color: var(--error); font-weight: 600;">Take down</a>
                                         {{if not .IsBlocked}}
                                         <form action="{{$.AdminURL}}/block/{{.ID}}" method="POST" class="action-form"
                                             onsubmit="return confirm('Block this file?');">

@@ -39,6 +39,7 @@
                 <div class="admin-nav">
                     <a href="{{.AdminURL}}">Files</a>
                     <a href="{{.AdminURL}}/reports" class="active">Reports</a>
+                    <a href="{{.AdminURL}}/ncmec">NCMEC</a>
                     <a href="{{.AdminURL}}/bans">Bans</a>
                     <a href="{{.AdminURL}}/tools">Tools</a>
                     <a href="{{.AdminURL}}/analytics">Analytics</a>
@@ -74,6 +75,7 @@
                                     <td>{{.CreatedAt.Format "Jan 02 15:04"}}</td>
                                     <td>
                                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                            <a href="{{$.AdminURL}}/ncmec/takedown/{{.FileID}}?report={{.ID}}" class="tag tag-red" style="font-weight: 600;">Take down + report</a>
                                             <form action="{{$.AdminURL}}/reports/{{.ID}}/action" method="POST"
                                                 class="action-form">
                                                 <input type="hidden" name="action" value="dismiss">

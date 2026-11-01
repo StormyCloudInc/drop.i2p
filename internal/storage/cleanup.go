@@ -15,7 +15,10 @@ func (m *Manager) CleanupExpired() {
 
 	// 1. Delete Expired Files from DB and Disk
 	// Find expired IDs
-	rows, err := db.DB.Query("SELECT id FROM files WHERE expiry_time IS NOT NULL AND expiry_time < ?", time.Now())
+	// Files under an evidence hold are skipped until the hold ends; after that
+	// they are purged here like any other expired file.
+	rows, err := db.DB.Query(`SELECT id FROM files WHERE expiry_time IS NOT NULL AND expiry_time < ?
+		AND (preserved_until IS NULL OR preserved_until < ?)`, time.Now(), now())
 	if err != nil {
 		log.Printf("Error querying expired files: %v", err)
 		return

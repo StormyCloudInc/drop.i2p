@@ -50,6 +50,23 @@ func runMigrations() error {
 	if err := addColumnIfMissing("files", "perceptual_hash", "TEXT"); err != nil {
 		return err
 	}
+
+	// Evidence retention and NCMEC reporting state
+	for _, c := range [][2]string{
+		{"preserved_until", "DATETIME"},
+		{"takedown_at", "DATETIME"},
+		{"ncmec_status", "TEXT"},
+		{"ncmec_report_id", "TEXT"},
+		{"ncmec_error", "TEXT"},
+		{"ncmec_reported_at", "DATETIME"},
+		{"ncmec_viewed", "INTEGER DEFAULT 0"},
+		{"ncmec_classification", "TEXT"},
+		{"ncmec_notes", "TEXT"},
+	} {
+		if err := addColumnIfMissing("files", c[0], c[1]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

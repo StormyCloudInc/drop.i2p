@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -71,6 +72,8 @@ var templates = template.Must(template.New("").Funcs(templateFuncs).ParseFiles(
 	"templates/donate.html",
 	"templates/error.html",
 	"templates/message.html",
+	"templates/admin_ncmec.html",
+	"templates/admin_takedown.html",
 ))
 
 // canDisplayInline returns true if the MIME type is safe to display in browser
@@ -736,7 +739,11 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.DeleteFile(fileID); err != nil {
+	if err := s.store.DeleteFile(fileID); errors.Is(err, storage.ErrPreserved) {
+		// Do not reveal that the file is held as evidence.
+		renderMessage(w, http.StatusGone, "error", "File Unavailable", "This file is no longer available.")
+		return
+	} else if err != nil {
 		http.Error(w, "Failed to delete", http.StatusInternalServerError)
 		return
 	}
@@ -849,7 +856,10 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
 	fileID := chi.URLParam(r, "fileID")
-	s.store.DeleteFile(fileID)
+	if err := s.store.DeleteFile(fileID); errors.Is(err, storage.ErrPreserved) {
+		redirectFlash(w, r, s.cfg.AdminURL, "That file is preserved as evidence and cannot be deleted until its hold ends.", "error")
+		return
+	}
 	http.Redirect(w, r, s.cfg.AdminURL, http.StatusSeeOther)
 }
 
@@ -931,10 +941,13 @@ func (s *Server) handleAdminReportAction(w http.ResponseWriter, r *http.Request)
 					http.Redirect(w, r, s.cfg.AdminURL+"/reports?flash=Failed+to+create+ban&flash_type=error", http.StatusSeeOther)
 					return
 				}
-				s.store.DeleteFile(report.FileID)
-				note := "Content hash banned and file deleted"
+				// Preserve rather than delete: reported material must be kept.
+				if err := s.store.QuarantineFile(report.FileID, s.evidenceHold(), false, false, "", ""); err != nil {
+					log.Printf("ban_hash: quarantine %s failed: %v", report.FileID, err)
+				}
+				note := "Content hash banned, file quarantined"
 				if file.PerceptualHash != "" {
-					note = "Content hash and perceptual hash banned, file deleted"
+					note = "Content hash and perceptual hash banned, file quarantined"
 				}
 				s.store.UpdateReportStatus(reportID, "actioned", fmt.Sprintf("%s (%d bans)", note, n))
 			}

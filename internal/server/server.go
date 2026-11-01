@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"drop-i2p/internal/imaging"
 	"drop-i2p/internal/metadata"
 	mw "drop-i2p/internal/middleware"
+	"drop-i2p/internal/ncmec"
 	"drop-i2p/internal/storage"
 	"drop-i2p/internal/webhook"
 
@@ -98,6 +100,7 @@ type Server struct {
 	webhook      *webhook.Notifier
 	announcement *AnnouncementReader
 	imageProc    *imaging.Processor
+	ncmec        *ncmec.Client // nil when credentials are not configured
 }
 
 func New(cfg *config.Config, store *storage.Manager) *Server {
@@ -123,7 +126,7 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 	// Initialize image processor (converts images to WebP for I2P bandwidth savings)
 	imageProcessor := imaging.NewProcessor(imaging.DefaultConfig())
 
-	return &Server{
+	s := &Server{
 		cfg:          cfg,
 		store:        store,
 		transport:    transport,
@@ -133,7 +136,11 @@ func New(cfg *config.Config, store *storage.Manager) *Server {
 		webhook:      webhookNotifier,
 		announcement: announcementReader,
 		imageProc:    imageProcessor,
+		ncmec:        newNCMECClient(cfg.NCMECEnv, cfg.NCMECUsername, cfg.NCMECPassword, cfg.NCMECReporterEmail),
 	}
+	log.Printf("NCMEC reporting: %s", s.ncmecMode())
+	go s.resumeNCMEC()
+	return s
 }
 
 // Webhook returns the webhook notifier for use by background tasks
@@ -246,6 +253,10 @@ func (s *Server) Router() http.Handler {
 		r.Get("/tools", s.handleAdminTools)
 		r.Post("/tools/cleanup", s.handleAdminCleanup)
 		r.Post("/tools/backfill-phash", s.handleAdminBackfillPHash)
+		r.Get("/ncmec", s.handleAdminNCMEC)
+		r.Get("/ncmec/takedown/{fileID}", s.handleAdminTakedownForm)
+		r.Post("/ncmec/takedown/{fileID}", s.handleAdminTakedown)
+		r.Post("/ncmec/send/{fileID}", s.handleAdminNCMECSend)
 		r.Get("/analytics", s.handleAdminAnalytics)
 	})
 

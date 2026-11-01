@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Take down - I2P Secure Share</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <div class="app-container" style="max-width: 1400px;">
+
+            <header class="header-section">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="text-align: left;">
+                        <a href="/" style="display: inline-block; margin-bottom: 0.5rem;">
+                            <img src="/static/images/stormycloud.svg" alt="StormyCloud Logo" style="height: 40px;">
+                        </a>
+                        <h1>Admin Dashboard</h1>
+                    </div>
+                    <div>
+                        <a href="/" class="btn">Back to Home</a>
+                    </div>
+                </div>
+            </header>
+
+            <main>
+                {{if .Flash}}
+                <div class="alert alert-{{.FlashType}}">
+                    {{.Flash}}
+                </div>
+                {{end}}
+
+                <div class="admin-nav">
+                    <a href="{{.AdminURL}}">Files</a>
+                    <a href="{{.AdminURL}}/reports">Reports</a>
+                    <a href="{{.AdminURL}}/ncmec">NCMEC</a>
+                    <a href="{{.AdminURL}}/bans">Bans</a>
+                    <a href="{{.AdminURL}}/tools">Tools</a>
+                    <a href="{{.AdminURL}}/analytics">Analytics</a>
+                </div>
+
+                <div class="glass-panel" style="padding: 2rem; max-width: 760px;">
+                    <h2 class="mb-2">Take down and report</h2>
+                    {{if .Evidence}}{{if .Evidence.TakedownAt}}
+                    <div class="alert alert-error">This file was already taken down. Submitting again updates its details and re-queues the report if it was not filed.</div>
+                    {{end}}{{end}}
+                    <p class="text-muted">The file is not shown here. You do not need to open it to act.</p>
+                    <table class="data-table" style="margin: 1rem 0;">
+                        <tr><th>File ID</th><td><code>{{.File.ID}}</code></td></tr>
+                        <tr><th>Name</th><td>{{.File.Filename}}</td></tr>
+                        <tr><th>Type / size</th><td>{{.File.MimeType}} &middot; {{formatBytes .File.Size}}{{if .File.IsClientEncrypted}} &middot; <span class="tag tag-yellow">E2EE: server cannot send contents</span>{{end}}</td></tr>
+                        <tr><th>Uploaded</th><td>{{.File.UploadTime.Format "2006-01-02 15:04 MST"}}</td></tr>
+                        <tr><th>Uploader</th><td><span class="text-truncate" title="{{.File.UploaderDest}}">{{if .File.UploaderDest}}{{.File.UploaderDest}}{{else}}unknown{{end}}</span></td></tr>
+                        <tr><th>SHA-256</th><td><code style="font-size: 0.75rem;">{{.File.ContentHash}}</code></td></tr>
+                    </table>
+
+                    <form action="{{.AdminURL}}/ncmec/takedown/{{.File.ID}}" method="POST"
+                        onsubmit="return confirm('Take this file down now?');">
+                        <input type="hidden" name="report_id" value="{{.ReportID}}">
+                        <p style="margin-bottom: 1rem;">This will immediately: block public access, ban the file's
+                            SHA-256 and perceptual hash, and preserve the encrypted file for {{.HoldDays}} days.</p>
+
+                        <label style="display: block; margin-bottom: 0.75rem;">
+                            <input type="checkbox" name="ban_uploader" checked style="width: auto;">
+                            Also ban the uploader's I2P destination
+                        </label>
+                        <label style="display: block; margin-bottom: 0.75rem;">
+                            <input type="checkbox" name="viewed" id="viewed" style="width: auto;"
+                                onchange="document.getElementById('cls').style.display = this.checked ? 'block' : 'none'">
+                            A person on our team viewed this file
+                        </label>
+                        <div id="cls" style="display: none; margin: 0 0 0.75rem 1.5rem;">
+                            <label>Classification (optional, only if viewed)
+                                <select name="classification">
+                                    <option value="">Not classified</option>
+                                    <option value="A1">A1: prepubescent, sex act</option>
+                                    <option value="A2">A2: prepubescent, lascivious exhibition</option>
+                                    <option value="B1">B1: pubescent, sex act</option>
+                                    <option value="B2">B2: pubescent, lascivious exhibition</option>
+                                </select>
+                            </label>
+                        </div>
+                        <label style="display: block; margin-bottom: 1rem;">Notes for NCMEC (optional)
+                            <textarea name="notes" rows="3" maxlength="2000" style="width: 100%;"
+                                placeholder="How it was found, e.g. user report, hash match"></textarea>
+                        </label>
+                        <label style="display: block; margin-bottom: 1.5rem;">
+                            <select name="report">
+                                <option value="queue">Take down AND report to NCMEC ({{.Mode}})</option>
+                                <option value="skip">Take down only (not CSAM, e.g. spam or malware)</option>
+                            </select>
+                        </label>
+                        <button type="submit" class="btn btn-danger">Take down now</button>
+                        <a href="{{.AdminURL}}" class="btn">Cancel</a>
+                    </form>
+                </div>
+            </main>
+
+            <footer>
+                <div class="text-center">
+                    <a href="http://stormycloud.i2p" target="_blank">StormyCloud Network</a>
+                    <span style="margin: 0 1rem; opacity: 0.3;">|</span>
+                    <a href="/donate">Donate</a>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+</body>
+
+</html>
