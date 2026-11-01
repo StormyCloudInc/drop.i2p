@@ -39,3 +39,6 @@ Thumbs.db
 
 # Server reports - contain host IP, SSH details, secret inventory
 SERVER_REPORT*.md
+
+# NCMEC schema, downloaded with ESP credentials via tools/ncmeccheck
+internal/ncmec/testdata/
