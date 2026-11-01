@@ -99,7 +99,16 @@ func parse(data []byte, resp *http.Response) (*Response, error) {
 		e := &APIError{HTTPStatus: resp.StatusCode, Code: r.ResponseCode, Description: r.ResponseDescription, RequestID: resp.Header.Get("Request-ID")}
 		if xmlErr != nil {
 			e.Code = -1
-			e.Description = "unparseable response: " + truncate(string(data), 300)
+			switch {
+			case resp.StatusCode == http.StatusUnauthorized:
+				e.Code = CodeAuthRequired
+				e.Description = "authentication failed: check username and password"
+			case resp.StatusCode == http.StatusForbidden:
+				e.Code = CodeNotAuthorized
+				e.Description = "not authorized for this action"
+			default:
+				e.Description = "unparseable response: " + truncate(string(data), 300)
+			}
 		}
 		return nil, e
 	}
